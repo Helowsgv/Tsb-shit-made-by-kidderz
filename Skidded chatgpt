@@ -1,0 +1,286 @@
+--// Script 1: Infinite Yield
+loadstring(game:HttpGet('https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source'))()
+
+--// Script 2: Debris Cleaner & Simplifier
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Thrown = Workspace:WaitForChild("Thrown")
+
+local instancesToDelete = {
+    ["Model"] = true,
+    ["BasePart"] = true,
+    ["Part"] = true,
+    ["Texture"] = true,
+    ["Decal"] = true,
+    ["ParticleEmitter"] = true,
+    ["Trail"] = true,
+}
+
+if Thrown then
+    for _, child in ipairs(Thrown:GetDescendants()) do
+        task.wait()
+        if instancesToDelete[child.ClassName] and child.Name ~= "Aurora" then
+            child:Destroy()
+        end
+    end
+
+    Thrown.DescendantAdded:Connect(function(child)
+        task.wait()
+        if instancesToDelete[child.ClassName] and child.Name ~= "Aurora" then
+            child:Destroy()
+        end
+    end)
+end
+
+local function isInCharacter(obj)
+    local model = obj:FindFirstAncestorOfClass("Model")
+    return model and model:FindFirstChildOfClass("Humanoid") ~= nil
+end
+
+local function simplifyPart(part)
+    if part:IsA("BasePart") and not isInCharacter(part) then
+        part.Material = Enum.Material.SmoothPlastic
+        for _, child in ipairs(part:GetChildren()) do
+            if child:IsA("Texture") or child:IsA("Decal") then
+                child.Texture = "rbxassetid://0"
+            end
+        end
+    end
+end
+
+local function destroyUnwantedParticleEmitter(obj)
+    if obj:IsA("ParticleEmitter") and obj.Name ~= "Aurora" then
+        obj:Destroy()
+    end
+end
+
+local function cleanDescendants(container)
+    for _, obj in ipairs(container:GetDescendants()) do
+        simplifyPart(obj)
+        destroyUnwantedParticleEmitter(obj)
+    end
+end
+
+task.spawn(cleanDescendants, Workspace)
+task.spawn(cleanDescendants, ReplicatedStorage)
+
+Workspace.DescendantAdded:Connect(function(obj)
+    task.wait()
+    task.spawn(simplifyPart, obj)
+    destroyUnwantedParticleEmitter(obj)
+end)
+
+ReplicatedStorage.DescendantAdded:Connect(function(obj)
+    task.wait()
+    task.spawn(simplifyPart, obj)
+    destroyUnwantedParticleEmitter(obj)
+end)
+
+--// Script 3: Prediction Marker
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+local localPlayer = Players.LocalPlayer
+
+local function createPredictionMarker(name)
+	local marker = Instance.new("Part")
+	marker.Name = name
+	marker.Size = Vector3.new(0.3, 0.3, 0.3)
+	marker.Color = Color3.fromRGB(255, 0, 0)
+	marker.Material = Enum.Material.Neon
+	marker.Anchored = true
+	marker.CanCollide = false
+	marker.Transparency = 0.1
+	marker.Parent = workspace
+	return marker
+end
+
+local function getTorso(character)
+	return character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+end
+
+local function predictTorsoPosition(targetCharacter, predictionTime, deltaTime)
+	local torso = getTorso(targetCharacter)
+	if not torso then return end
+
+	local velocity = torso.Velocity
+	local predictedPosition = torso.Position + (velocity * predictionTime)
+
+	local markerName = "PredictionMarker_" .. targetCharacter.Name
+	local marker = workspace:FindFirstChild(markerName) or createPredictionMarker(markerName)
+
+	if not targetCharacter.Parent then
+		marker:Destroy()
+		return
+	end
+
+	local direction = predictedPosition - torso.Position
+	local distance = direction.Magnitude
+	if distance == 0 then return end
+
+	direction = direction.Unit
+	marker.Size = Vector3.new(0.2, 0.2, distance)
+	marker.CFrame = CFrame.new(torso.Position, predictedPosition) * CFrame.new(0, 0, -distance / 2)
+
+	-- Smooth interpolation
+	local speed = 50
+	local alpha = math.clamp(speed * deltaTime, 0, 1)
+	marker.Position = marker.Position:Lerp(predictedPosition, alpha)
+end
+
+local function splitString(str, separator)
+	local parts = {}
+	for part in string.gmatch(str, "([^" .. separator .. "]+)") do
+		table.insert(parts, part)
+	end
+	return parts
+end
+
+RunService.RenderStepped:Connect(function(deltaTime)
+	if not localPlayer or not localPlayer.Character then return end
+
+	local targetName
+	local success = pcall(function()
+		local dataFolder = workspace:WaitForChild("Live"):WaitForChild(localPlayer.Name)
+		local fullValue = dataFolder:GetAttribute("LastM1Hitted")
+		if fullValue then
+			local parts = splitString(fullValue, ";;")
+			targetName = parts[1]
+		end
+	end)
+
+	if not success or not targetName then
+		for _, marker in pairs(workspace:GetChildren()) do
+			if marker:IsA("Part") and marker.Name:match("^PredictionMarker_") then
+				marker:Destroy()
+			end
+		end
+		return
+	end
+
+	for _, player in pairs(Players:GetPlayers()) do
+		local markerName = "PredictionMarker_" .. player.Name
+		local existingMarker = workspace:FindFirstChild(markerName)
+
+		if player.Name == targetName and player.Character then
+			predictTorsoPosition(player.Character, 0.5, deltaTime)
+		elseif existingMarker then
+			existingMarker:Destroy()
+		end
+	end
+end)
+
+--// Script 4: Auto Rotate to Nearest Enemy
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+local lastTarget = nil
+local updateInterval = 0.1
+local lastUpdateTime = 0
+local MAX_DISTANCE = 15
+
+local function isAlive()
+	return humanoid and humanoid.Health > 0
+end
+
+local function hasRagdoll()
+	return Workspace:FindFirstChild("Live")
+		and Workspace.Live:FindFirstChild(player.Name)
+		and Workspace.Live[player.Name]:FindFirstChild("Ragdoll")
+end
+
+local function getNearestHumanoid()
+	local liveFolder = Workspace:FindFirstChild("Live")
+	if not liveFolder then return nil end
+
+	local nearestHumanoid = nil
+	local shortestDistance = MAX_DISTANCE
+
+	for _, model in ipairs(liveFolder:GetChildren()) do
+		if model:IsA("Model") and model.Name ~= player.Name then
+			local humanoid = model:FindFirstChild("Humanoid")
+			local rootPart = model:FindFirstChild("HumanoidRootPart")
+			if humanoid and rootPart then
+				local distance = (humanoidRootPart.Position - rootPart.Position).Magnitude
+				if distance <= shortestDistance then
+					shortestDistance = distance
+					nearestHumanoid = model
+				end
+			end
+		end
+	end
+
+	return nearestHumanoid
+end
+
+local function lockOntoTarget(target)
+	if not target or hasRagdoll() or not isAlive() then return end
+
+	local targetHumanoid = target:FindFirstChild("Humanoid")
+	local rootPart = target:FindFirstChild("HumanoidRootPart")
+	if targetHumanoid and rootPart then
+		local targetPosition = Vector3.new(rootPart.Position.X, humanoidRootPart.Position.Y, rootPart.Position.Z)
+		local lookAtCFrame = CFrame.lookAt(humanoidRootPart.Position, targetPosition)
+
+		if humanoid.MoveDirection.Magnitude == 0 then
+			humanoidRootPart.CFrame = lookAtCFrame
+		end
+
+		lastTarget = target
+	end
+end
+
+local function updateLookDirection()
+	if hasRagdoll() or not isAlive() then return end
+
+	if tick() - lastUpdateTime >= updateInterval then
+		lastUpdateTime = tick()
+		local newTarget = getNearestHumanoid()
+		if newTarget then
+			lockOntoTarget(newTarget)
+		end
+	end
+end
+
+-- Frame-by-frame update
+RunService.RenderStepped:Connect(function()
+	updateLookDirection()
+end)
+
+-- Character Respawn
+player.CharacterAdded:Connect(function(newCharacter)
+	character = newCharacter
+	humanoid = character:WaitForChild("Humanoid")
+	humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+end)
+
+--// Script 5: Auto Step to Target
+local function miniWalk(targetPosition)
+	if not targetPosition or not hrp then return end
+
+	local distanceToTarget = (targetPosition - hrp.Position).Magnitude
+	if distanceToTarget <= STOP_DISTANCE then return end
+
+	local moveDirection = (targetPosition - hrp.Position).Unit
+	local moveSpeed = 16 -- studs per second (you can change this)
+
+	-- Move based on frame time to make it smooth
+	local deltaTime = RunService.RenderStepped:Wait()
+	local moveStep = moveDirection * moveSpeed * deltaTime
+
+	-- Don't overshoot target
+	if moveStep.Magnitude > distanceToTarget - STOP_DISTANCE then
+		moveStep = moveDirection * (distanceToTarget - STOP_DISTANCE)
+	end
+
+	hrp.CFrame = hrp.CFrame + moveStep
+end
