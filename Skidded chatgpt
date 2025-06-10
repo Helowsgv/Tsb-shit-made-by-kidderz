@@ -188,14 +188,29 @@ local updateInterval = 0.1
 local lastUpdateTime = 0
 local MAX_DISTANCE = 15
 
+-- Helper: get your own Live model in workspace
+local function getLiveModel()
+	local liveFolder = Workspace:FindFirstChild("Live")
+	if not liveFolder then return nil end
+	return liveFolder:FindFirstChild(player.Name)
+end
+
+-- Check if Blocking attribute is enabled
+local function isBlocking()
+	local liveModel = getLiveModel()
+	if liveModel and liveModel:GetAttribute("Blocking") then
+		return true
+	end
+	return false
+end
+
 local function isAlive()
 	return humanoid and humanoid.Health > 0
 end
 
 local function hasRagdoll()
-	return Workspace:FindFirstChild("Live")
-		and Workspace.Live:FindFirstChild(player.Name)
-		and Workspace.Live[player.Name]:FindFirstChild("Ragdoll")
+	local liveModel = getLiveModel()
+	return liveModel and liveModel:FindFirstChild("Ragdoll")
 end
 
 local function getNearestHumanoid()
@@ -223,7 +238,7 @@ local function getNearestHumanoid()
 end
 
 local function lockOntoTarget(target)
-	if not target or hasRagdoll() or not isAlive() then return end
+	if not target or hasRagdoll() or not isAlive() or isBlocking() then return end
 
 	local targetHumanoid = target:FindFirstChild("Humanoid")
 	local rootPart = target:FindFirstChild("HumanoidRootPart")
@@ -240,7 +255,7 @@ local function lockOntoTarget(target)
 end
 
 local function updateLookDirection()
-	if hasRagdoll() or not isAlive() then return end
+	if hasRagdoll() or not isAlive() or isBlocking() then return end
 
 	if tick() - lastUpdateTime >= updateInterval then
 		lastUpdateTime = tick()
