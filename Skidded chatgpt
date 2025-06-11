@@ -299,3 +299,29 @@ local function miniWalk(targetPosition)
 
 	hrp.CFrame = hrp.CFrame + moveStep
 end
+
+--// Script 6: Remove bushes
+
+local TreesFolder = workspace:WaitForChild("Map"):WaitForChild("Trees")
+
+local function deleteFakeMeshParts()
+	for _, treeModel in ipairs(TreesFolder:GetChildren()) do
+		local innerTree = treeModel:FindFirstChild("Tree")
+		if innerTree and innerTree:IsA("Model") then
+			for _, part in ipairs(innerTree:GetChildren()) do
+				if part:IsA("BasePart") and part.Name == "MeshPart" then
+					part:Destroy()
+				end
+			end
+		end
+	end
+end
+
+-- Run once at start
+deleteFakeMeshParts()
+
+-- Keep cleaning every second
+while true do
+	task.wait(1)
+	deleteFakeMeshParts()
+end
