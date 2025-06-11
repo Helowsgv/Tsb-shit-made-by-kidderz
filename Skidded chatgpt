@@ -327,6 +327,7 @@ while true do
 end
 
 --// Script 7: Death counter notif
+-- Death Counter Notifier with Highlight Integration (Persistent after Respawn)
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
