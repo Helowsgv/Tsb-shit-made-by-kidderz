@@ -106,3 +106,41 @@ LocalPlayer.CharacterAdded:Connect(function()
 end)
 
 --// Script 2: Noclik when garo parre
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
+local localPlayer = Players.LocalPlayer
+
+-- Function to check if M1 is allowed
+local function isM1Blocked()
+	local success, result = pcall(function()
+		local live = workspace:FindFirstChild("Live")
+		local playerData = live and live:FindFirstChild(localPlayer.Name)
+		if not playerData then return false end
+
+		local attr = playerData:GetAttribute("LastM1Hitted")
+		if not attr then return false end
+
+		local targetName = string.split(attr, ";;")[1]
+		local target = live:FindFirstChild(targetName)
+		if not target then return false end
+
+		return target:FindFirstChild("HunterCounter") ~= nil
+	end)
+	return success and result
+end
+
+-- Intercept M1 clicks
+local function onInput(actionName, inputState, inputObject)
+	if inputState == Enum.UserInputState.Begin and inputObject.UserInputType == Enum.UserInputType.MouseButton1 then
+		if isM1Blocked() then
+			warn("M1 blocked: LastM1Hitted has HunterCounter!")
+			return Enum.ContextActionResult.Sink -- block the input
+		end
+	end
+	return Enum.ContextActionResult.Pass
+end
+
+-- Bind the M1 block
+ContextActionService:BindAction("BlockM1IfHunterCounter", onInput, false, Enum.UserInputType.MouseButton1)
