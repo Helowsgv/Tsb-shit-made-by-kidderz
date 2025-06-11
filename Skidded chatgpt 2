@@ -104,3 +104,5 @@ LocalPlayer.CharacterAdded:Connect(function()
     screenGui:Destroy()
     screenGui, notificationFrame, nameLabel = createUI()
 end)
+
+--// Script 2: Noclik when garo parre
