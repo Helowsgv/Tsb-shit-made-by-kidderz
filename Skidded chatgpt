@@ -333,41 +333,47 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local Workspace = game:GetService("Workspace")
 
--- UI setup
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "DeathCounterNotifierGUI"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+-- UI setup function
+local function createUI()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "DeathCounterNotifierGUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
-local notificationFrame = Instance.new("Frame")
-notificationFrame.Name = "NotificationFrame"
-notificationFrame.Size = UDim2.new(0, 250, 0, 100)
-notificationFrame.Position = UDim2.new(1, -260, 1, -110)
-notificationFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-notificationFrame.BackgroundTransparency = 0.3
-notificationFrame.BorderSizePixel = 0
-notificationFrame.Visible = false
-notificationFrame.Parent = screenGui
+    local notificationFrame = Instance.new("Frame")
+    notificationFrame.Name = "NotificationFrame"
+    notificationFrame.Size = UDim2.new(0, 250, 0, 100)
+    notificationFrame.Position = UDim2.new(1, -260, 1, -110)
+    notificationFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    notificationFrame.BackgroundTransparency = 0.3
+    notificationFrame.BorderSizePixel = 0
+    notificationFrame.Visible = false
+    notificationFrame.Parent = screenGui
 
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Size = UDim2.new(1, 0, 0.4, 0)
-titleLabel.Position = UDim2.new(0, 0, 0, 0)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "Death Counter Detected"
-titleLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
-titleLabel.Font = Enum.Font.GothamBold
-titleLabel.TextScaled = true
-titleLabel.Parent = notificationFrame
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, 0, 0.4, 0)
+    titleLabel.Position = UDim2.new(0, 0, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "Death Counter Detected"
+    titleLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextScaled = true
+    titleLabel.Parent = notificationFrame
 
-local nameLabel = Instance.new("TextLabel")
-nameLabel.Size = UDim2.new(1, 0, 0.6, 0)
-nameLabel.Position = UDim2.new(0, 0, 0.4, 0)
-nameLabel.BackgroundTransparency = 1
-nameLabel.Text = ""
-nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-nameLabel.Font = Enum.Font.Gotham
-nameLabel.TextScaled = true
-nameLabel.Parent = notificationFrame
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, 0, 0.6, 0)
+    nameLabel.Position = UDim2.new(0, 0, 0.4, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = ""
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    nameLabel.Font = Enum.Font.Gotham
+    nameLabel.TextScaled = true
+    nameLabel.Parent = notificationFrame
+
+    return screenGui, notificationFrame, nameLabel
+end
+
+local screenGui, notificationFrame, nameLabel = createUI()
 
 -- Improved highlight using Roblox Highlight object
 local highlightInstances = {}
@@ -390,26 +396,37 @@ local function updateHighlight(model, state)
     end
 end
 
-RunService.RenderStepped:Connect(function()
-    local found = false
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            local model = Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(player.Name)
-            if model then
-                local hasCounter = model:FindFirstChild("Counter") ~= nil
-                updateHighlight(model, hasCounter)
+local function monitorDeathCounters()
+    RunService.RenderStepped:Connect(function()
+        local found = false
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                local model = Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(player.Name)
+                if model then
+                    local hasCounter = model:FindFirstChild("Counter") ~= nil
+                    updateHighlight(model, hasCounter)
 
-                if hasCounter then
-                    found = true
-                    notificationFrame.Visible = true
-                    nameLabel.Text = player.Name
+                    if hasCounter then
+                        found = true
+                        notificationFrame.Visible = true
+                        nameLabel.Text = player.Name
+                    end
                 end
             end
         end
-    end
 
-    if not found then
-        notificationFrame.Visible = false
-        nameLabel.Text = ""
-    end
+        if not found then
+            notificationFrame.Visible = false
+            nameLabel.Text = ""
+        end
+    end)
+end
+
+-- Initial start and persistent respawn connection
+monitorDeathCounters()
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1) -- wait to ensure GUI and workspace are fully ready
+    screenGui:Destroy()
+    screenGui, notificationFrame, nameLabel = createUI()
 end)
