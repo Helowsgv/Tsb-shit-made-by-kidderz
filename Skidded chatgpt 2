@@ -110,37 +110,73 @@ end)
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local ContextActionService = game:GetService("ContextActionService")
-local localPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
--- Function to check if M1 is allowed
-local function isM1Blocked()
+local localPlayer = Players.LocalPlayer
+local queuedClick = false
+local counterStartTime = 0
+local counterDuration = 0.705
+local lastTargetName = nil
+
+-- Get target if it has HunterCounter
+local function getCounterTarget()
 	local success, result = pcall(function()
 		local live = workspace:FindFirstChild("Live")
 		local playerData = live and live:FindFirstChild(localPlayer.Name)
-		if not playerData then return false end
+		if not playerData then return nil end
 
 		local attr = playerData:GetAttribute("LastM1Hitted")
-		if not attr then return false end
+		if not attr then return nil end
 
-		local targetName = string.split(attr, ";;")[1]
-		local target = live:FindFirstChild(targetName)
-		if not target then return false end
+		local name = string.split(attr, ";;")[1]
+		local target = live:FindFirstChild(name)
+		if not target then return nil end
 
-		return target:FindFirstChild("HunterCounter") ~= nil
+		if target:FindFirstChild("HunterCounter") then
+			return target, name
+		end
+
+		return nil
 	end)
-	return success and result
+	if success then return result end
 end
 
--- Intercept M1 clicks
+-- Handle M1 click input
 local function onInput(actionName, inputState, inputObject)
 	if inputState == Enum.UserInputState.Begin and inputObject.UserInputType == Enum.UserInputType.MouseButton1 then
-		if isM1Blocked() then
-			warn("M1 blocked: LastM1Hitted has HunterCounter!")
-			return Enum.ContextActionResult.Sink -- block the input
+		local target, name = getCounterTarget()
+		if target then
+			if not queuedClick then
+				counterStartTime = tick()
+				queuedClick = true
+				lastTargetName = name
+				warn("M1 queued due to HunterCounter")
+			end
+			return Enum.ContextActionResult.Sink
 		end
 	end
 	return Enum.ContextActionResult.Pass
 end
 
--- Bind the M1 block
+-- Monitor queue and release click at perfect time
+RunService.RenderStepped:Connect(function()
+	if queuedClick and lastTargetName then
+		local live = workspace:FindFirstChild("Live")
+		local target = live and live:FindFirstChild(lastTargetName)
+
+		-- If counter disappeared or time passed, fire click
+		local stillHasCounter = target and target:FindFirstChild("HunterCounter")
+		if tick() - counterStartTime >= counterDuration or not stillHasCounter then
+			queuedClick = false
+			lastTargetName = nil
+			VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+			VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+			warn("M1 auto-fired at end of HunterCounter")
+		end
+	end
+end)
+
+-- Bind input blocking
 ContextActionService:BindAction("BlockM1IfHunterCounter", onInput, false, Enum.UserInputType.MouseButton1)
+
