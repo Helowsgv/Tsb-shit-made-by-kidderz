@@ -816,15 +816,15 @@ local character = player.Character or player.CharacterAdded:Wait()
 local hrp = character:WaitForChild("HumanoidRootPart")
 
 local lastM1ingExists = false
-local SAFE_DISTANCE = 6 -- stud radius
+local SAFE_DISTANCE = 6 -- max distance to check for enemies
 
--- Move forward by 1 stud in the direction the character is facing
-local function moveForward0.5Stud()
+-- ✅ Move forward by 0.5 studs
+local function moveForwardHalfStud()
 	if not hrp then return end
-	hrp.CFrame = hrp.CFrame + hrp.CFrame.LookVector.Unit
+	hrp.CFrame = hrp.CFrame + hrp.CFrame.LookVector.Unit * 0.5
 end
 
--- Check if any other player is within 0–4 studs
+-- ❌ Prevents moving if enemy is too close
 local function isTooCloseToEnemy()
 	local liveFolder = Workspace:FindFirstChild("Live")
 	if not liveFolder then return false end
@@ -835,16 +835,16 @@ local function isTooCloseToEnemy()
 			if enemyHRP then
 				local distance = (hrp.Position - enemyHRP.Position).Magnitude
 				if distance <= SAFE_DISTANCE then
-					return true -- too close, block movement
+					return true
 				end
 			end
 		end
 	end
 
-	return false -- no one close
+	return false
 end
 
--- Per-frame check
+-- 🔁 Update every frame
 RunService.RenderStepped:Connect(function()
 	local liveFolder = Workspace:FindFirstChild("Live")
 	if not liveFolder then return end
@@ -854,15 +854,14 @@ RunService.RenderStepped:Connect(function()
 
 	local m1ingExists = myModel:FindFirstChild("M1ing") ~= nil
 
-	-- Move only when M1ing appears and we're not near an enemy
 	if m1ingExists and not lastM1ingExists and not isTooCloseToEnemy() then
-		moveForward0.5Stud()
+		moveForwardHalfStud()
 	end
 
 	lastM1ingExists = m1ingExists
 end)
 
--- Reset on respawn
+-- ♻️ On respawn
 player.CharacterAdded:Connect(function(char)
 	character = char
 	hrp = character:WaitForChild("HumanoidRootPart")
