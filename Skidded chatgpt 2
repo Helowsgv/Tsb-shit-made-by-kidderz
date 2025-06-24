@@ -454,6 +454,8 @@ local plr = game:GetService("Players").LocalPlayer
 local uis = game:GetService("UserInputService")
 local stgui = game:GetService("StarterGui")
 
+local activated = false
+
 local frontDashArgs = {
 	[1] = {
 		["Dash"] = Enum.KeyCode.W,
@@ -470,7 +472,7 @@ end
 
 local function noEndlagSetup(char)
 	uis.InputBegan:Connect(function(input, t)
-		if t then return end
+		if not activated or t then return end
 		if input.KeyCode == Enum.KeyCode.Q and not uis:IsKeyDown(Enum.KeyCode.D)
 			and not uis:IsKeyDown(Enum.KeyCode.A)
 			and not uis:IsKeyDown(Enum.KeyCode.S)
@@ -512,7 +514,7 @@ end
 local function emoteDashSetup(char)
 	local hrp = char:WaitForChild("HumanoidRootPart")
 	uis.InputBegan:Connect(function(input, t)
-		if t then return end
+		if not activated or t then return end
 
 		if input.KeyCode == Enum.KeyCode.Q
 			and not uis:IsKeyDown(Enum.KeyCode.W)
@@ -528,32 +530,32 @@ local function emoteDashSetup(char)
 	end)
 end
 
--- 🔁 Set up functions, run twice
 local function fullSetup(char)
 	noEndlagSetup(char)
 	emoteDashSetup(char)
-	-- Run again for redundancy
-	noEndlagSetup(char)
+	noEndlagSetup(char) -- run twice like before
 	emoteDashSetup(char)
 end
 
-if plr.Character then
-	fullSetup(plr.Character)
-end
+-- 🔘 Activate only on `-` key press
+uis.InputBegan:Connect(function(input, gpe)
+	if gpe then return end
+	if input.KeyCode == Enum.KeyCode.Minus and not activated then
+		activated = true
 
-plr.CharacterAdded:Connect(fullSetup)
+		if plr.Character then
+			fullSetup(plr.Character)
+		end
 
--- ✅ Notification (optional toggle)
-if not getgenv().DisableNotification then
-	stgui:SetCore("SendNotification", {
-		Title = "[Skidded loaded] made by Alex",
-		Icon = "rbxassetid://13333189503",
-		Text = "Fuck ego's",
-		Duration = 5,
-		Button1 = "Dismiss",
-		Callback = function() end
-	})
-end
+		plr.CharacterAdded:Connect(fullSetup)
+
+		stgui:SetCore("SendNotification", {
+			Title = "✅ Activated",
+			Text = "Dash mod is now running.",
+			Duration = 3
+		})
+	end
+end)
 
 
 --// Script 6: auto
@@ -817,7 +819,7 @@ local lastM1ingExists = false
 local SAFE_DISTANCE = 6 -- stud radius
 
 -- Move forward by 1 stud in the direction the character is facing
-local function moveForward1Stud()
+local function moveForward0.5Stud()
 	if not hrp then return end
 	hrp.CFrame = hrp.CFrame + hrp.CFrame.LookVector.Unit
 end
@@ -854,7 +856,7 @@ RunService.RenderStepped:Connect(function()
 
 	-- Move only when M1ing appears and we're not near an enemy
 	if m1ingExists and not lastM1ingExists and not isTooCloseToEnemy() then
-		moveForward1Stud()
+		moveForward0.5Stud()
 	end
 
 	lastM1ingExists = m1ingExists
