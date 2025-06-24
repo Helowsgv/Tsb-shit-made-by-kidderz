@@ -617,5 +617,173 @@ player.CharacterAdded:Connect(function(char)
 	character = char
 end)
 
+--// Script 7: Copy avatar
 
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local StarterGui = game:GetService("StarterGui")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local hairRemovedThisLife = false
+
+-- ✅ Remove FakeHead hair once per life
+local function removeFakeHeadHairOnce()
+	if hairRemovedThisLife then return end
+
+	local live = Workspace:FindFirstChild("Live")
+	if not live then return end
+
+	local myModel = live:FindFirstChild(LocalPlayer.Name)
+	if not myModel then return end
+
+	local fakeHead = myModel:FindFirstChild("FakeHead")
+	if not fakeHead then return end
+
+	for _, obj in ipairs(fakeHead:GetChildren()) do
+		if obj:IsA("Accessory") or obj:IsA("Instance") then
+			if obj.Name:lower():find("hair") then
+				obj:Destroy()
+			end
+		end
+	end
+
+	hairRemovedThisLife = true
+end
+
+-- 🧼 Clear current avatar
+local function clearCharacter()
+	local character = LocalPlayer.Character
+	if not character then return end
+
+	for _, item in ipairs(character:GetChildren()) do
+		if item:IsA("Accessory") or item:IsA("Shirt") or item:IsA("Pants")
+			or item:IsA("CharacterMesh") or item:IsA("BodyColors") or item:IsA("Decal") then
+			item:Destroy()
+		end
+	end
+
+	removeFakeHeadHairOnce()
+end
+
+-- 🧩 Weld accessories
+local function weldAccessory(accessory, character)
+	local handle = accessory:FindFirstChild("Handle")
+	if not handle then return end
+
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("Attachment") and handle:FindFirstChild(part.Name) then
+			local weld = Instance.new("Weld")
+			weld.Part0 = part.Parent
+			weld.Part1 = handle
+			weld.C0 = part.CFrame
+			weld.C1 = handle[part.Name].CFrame
+			weld.Parent = handle
+			accessory.Parent = character
+			return
+		end
+	end
+
+	accessory.Parent = character
+end
+
+-- 👕 Apply copied avatar appearance
+local function applyAppearance(model)
+	local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	clearCharacter()
+
+	for _, item in ipairs(model:GetChildren()) do
+		if item:IsA("Accessory") then
+			weldAccessory(item:Clone(), character)
+		elseif item:IsA("Shirt") or item:IsA("Pants") or item:IsA("BodyColors") then
+			item:Clone().Parent = character
+		elseif item:IsA("CharacterMesh") then
+			item:Clone().Parent = character
+		elseif item:IsA("Decal") and item.Name == "face" then
+			local head = character:FindFirstChild("Head")
+			if head then
+				local face = head:FindFirstChild("face")
+				if face then face:Destroy() end
+				item:Clone().Parent = head
+			end
+		end
+	end
+
+	StarterGui:SetCore("ChatMakeSystemMessage", {
+		Text = "✅ Avatar applied!";
+		Color = Color3.fromRGB(0, 255, 0);
+		Font = Enum.Font.SourceSansBold;
+		FontSize = Enum.FontSize.Size24;
+	})
+end
+
+-- 📦 Load and apply avatar by UserId
+local function loadAndApplyAvatar(userId)
+	print("🔄 Loading avatar for UserId:", userId)
+
+	local success, modelOrErr = pcall(function()
+		return Players:GetCharacterAppearanceAsync(userId)
+	end)
+
+	if success and modelOrErr then
+		applyAppearance(modelOrErr)
+	else
+		warn("❌ Failed to load avatar:", modelOrErr)
+	end
+end
+
+-- 🔁 Reset hair flag per respawn
+LocalPlayer.CharacterAdded:Connect(function()
+	task.wait(1)
+	hairRemovedThisLife = false
+end)
+
+-- 🖥 GUI Setup (small, bottom-left, black, gray text)
+local screenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
+screenGui.Name = "AvatarGui"
+screenGui.ResetOnSpawn = false
+
+local frame = Instance.new("Frame", screenGui)
+frame.BackgroundColor3 = Color3.new(0, 0, 0)
+frame.Size = UDim2.new(0, 85, 0, 22) -- 👈 smaller frame
+frame.Position = UDim2.new(0, 10, 1, -30)
+frame.BorderSizePixel = 0
+
+local textBox = Instance.new("TextBox", frame)
+textBox.PlaceholderText = "UserId"
+textBox.Size = UDim2.new(1, -6, 1, -6)
+textBox.Position = UDim2.new(0, 3, 0, 3)
+textBox.BackgroundColor3 = Color3.new(0, 0, 0) -- black textbox
+textBox.TextColor3 = Color3.fromRGB(160, 160, 160) -- gray text
+textBox.ClearTextOnFocus = false
+textBox.TextScaled = true
+textBox.Font = Enum.Font.SourceSans
+textBox.Text = ""
+
+-- 🔂 Press enter to apply
+textBox.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		local id = tonumber(textBox.Text)
+		if id then
+			loadAndApplyAvatar(id)
+		else
+			StarterGui:SetCore("ChatMakeSystemMessage", {
+				Text = "⚠️ Invalid UserId!";
+				Color = Color3.fromRGB(255, 100, 100);
+				Font = Enum.Font.SourceSansBold;
+				FontSize = Enum.FontSize.Size24;
+			})
+		end
+	end
+end)
+
+-- 🎯 Press `'` to focus textbox
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode == Enum.KeyCode.Quote then -- `Quote` is the `'` key
+		if not textBox:IsFocused() then
+			textBox:CaptureFocus()
+		end
+	end
+end)
 
