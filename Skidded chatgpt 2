@@ -867,3 +867,103 @@ player.CharacterAdded:Connect(function(char)
 	hrp = character:WaitForChild("HumanoidRootPart")
 	lastM1ingExists = false
 end)
+
+--// Script 9: Kill sound
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local SoundService = game:GetService("SoundService")
+local Debris = game:GetService("Debris")
+
+local localPlayer = Players.LocalPlayer
+local playerName = localPlayer.Name
+local liveFolder = Workspace:WaitForChild("Live")
+
+local lastDamageValue = 0
+local killSoundOnCooldown = false
+local recentlyKilled = {}
+
+-- 🔊 Kill Sound
+local function playKillSound()
+	local s = Instance.new("Sound")
+	s.SoundId = "rbxassetid://131961137" -- Replace with your sound
+	s.Volume = 1
+	s.Parent = SoundService
+	s:Play()
+	Debris:AddItem(s, 5)
+
+	-- Start global cooldown (3 seconds)
+	killSoundOnCooldown = true
+	task.delay(3, function()
+		killSoundOnCooldown = false
+	end)
+end
+
+-- ♻️ Reset per-target kill flag
+local function watchTargetRespawn(model)
+	local name = model.Name
+	if recentlyKilled[name] == "watching" then return end
+	recentlyKilled[name] = "watching"
+
+	local hum = model:FindFirstChildWhichIsA("Humanoid")
+	if hum then
+		hum.Died:Connect(function()
+			task.delay(1.5, function()
+				recentlyKilled[name] = nil
+				warn("♻️ Reset kill flag for: " .. name)
+			end)
+		end)
+	end
+
+	model.ChildRemoved:Connect(function(child)
+		if child:IsA("Humanoid") then
+			recentlyKilled[name] = nil
+			warn("♻️ Humanoid removed for: " .. name)
+		end
+	end)
+end
+
+-- 🔁 Main kill detection loop
+RunService.Heartbeat:Connect(function()
+	local myModel = liveFolder:FindFirstChild(playerName)
+	if not myModel then return end
+
+	local fullValue = myModel:GetAttribute("LastM1Hitted")
+	local currentDamage = myModel:GetAttribute("LastDamageDone")
+
+	local targetName
+	if fullValue then
+		local parts = string.split(fullValue, ";;")
+		targetName = parts[1]
+	end
+
+	if targetName and currentDamage and currentDamage ~= lastDamageValue then
+		local targetModel = liveFolder:FindFirstChild(targetName)
+		if not targetModel then return end
+
+		local humanoid = targetModel:FindFirstChildWhichIsA("Humanoid")
+		local lastHit = targetModel:GetAttribute("LastHit")
+
+		if lastHit == playerName and humanoid and humanoid.Health <= 0 then
+			if not killSoundOnCooldown and recentlyKilled[targetName] ~= true then
+				playKillSound()
+				warn("✅ Kill sound played for:", targetName)
+				recentlyKilled[targetName] = true
+				watchTargetRespawn(targetModel)
+			else
+				warn("⏳ Kill sound blocked (cooldown or already played) for:", targetName)
+			end
+		end
+	end
+
+	lastDamageValue = currentDamage
+end)
+
+-- 🔄 Reset local state on respawn
+localPlayer.CharacterAdded:Connect(function()
+	lastDamageValue = 0
+	recentlyKilled = {}
+	killSoundOnCooldown = false
+end)
+
