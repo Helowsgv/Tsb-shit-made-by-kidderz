@@ -814,7 +814,7 @@ local character = player.Character or player.CharacterAdded:Wait()
 local hrp = character:WaitForChild("HumanoidRootPart")
 
 local lastM1ingExists = false
-local SAFE_DISTANCE = 4 -- stud radius
+local SAFE_DISTANCE = 6 -- stud radius
 
 -- Move forward by 1 stud in the direction the character is facing
 local function moveForward1Stud()
