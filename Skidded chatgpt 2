@@ -180,3 +180,366 @@ end)
 -- Bind input blocking
 ContextActionService:BindAction("BlockM1IfHunterCounter", onInput, false, Enum.UserInputType.MouseButton1)
 
+
+--// Script 3: Blocking
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local player = Players.LocalPlayer
+
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+-- Config
+local MAX_DISTANCE = 30
+local SMOOTHNESS = 0.20
+local MAX_VELOCITY = 100
+
+local DEFAULT_PREDICT_TIME = 0.3
+local RUN_PREDICT_TIME = 0.1
+local DASH_PREDICT_TIME = 0.4
+
+-- State
+local isRagdolled = false
+local hasTarget = false
+local scriptActive = true
+
+-- ✅ GUI Checkmark
+local function createCheckmark()
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "BlockCheckGui"
+	screenGui.ResetOnSpawn = false
+	screenGui.Parent = player:WaitForChild("PlayerGui")
+
+	local label = Instance.new("TextLabel")
+	label.Name = "BlockIndicator"
+	label.Size = UDim2.new(0, 120, 0, 35)
+	label.Position = UDim2.new(0, 10, 0, 10)
+	label.BackgroundTransparency = 1
+	label.Text = "🛡️ Blocking"
+	label.TextColor3 = Color3.fromRGB(0, 255, 0)
+	label.TextScaled = true
+	label.Visible = false
+	label.Parent = screenGui
+
+	return label
+end
+
+local blockIndicator = createCheckmark()
+
+-- Helpers
+local function getLiveModel()
+	local live = Workspace:FindFirstChild("Live")
+	return live and live:FindFirstChild(player.Name)
+end
+
+local function isBlocking()
+	if not scriptActive then return false end
+	local live = getLiveModel()
+	local value = live and live:GetAttribute("Blocking")
+	blockIndicator.Visible = value == true
+	return value == true
+end
+
+local function isAlive()
+	return humanoid and humanoid.Health > 0
+end
+
+local function getNearestHumanoid()
+	if not scriptActive then return nil end
+	local liveFolder = Workspace:FindFirstChild("Live")
+	if not liveFolder then return nil end
+
+	local closest = nil
+	local shortest = MAX_DISTANCE
+
+	for _, model in pairs(liveFolder:GetChildren()) do
+		if model:IsA("Model") and model.Name ~= player.Name then
+			local h = model:FindFirstChild("Humanoid")
+			local r = model:FindFirstChild("HumanoidRootPart")
+			if h and r then
+				local dist = (rootPart.Position - r.Position).Magnitude
+				if dist <= shortest then
+					shortest = dist
+					closest = model
+				end
+			end
+		end
+	end
+
+	return closest
+end
+
+-- 🔁 Frame Update
+RunService.RenderStepped:Connect(function()
+	if not scriptActive or not isAlive() then
+		if humanoid then humanoid.AutoRotate = false end
+		if blockIndicator then blockIndicator.Visible = false end
+		return
+	end
+
+	local blocking = isBlocking()
+	if not blocking then
+		humanoid.AutoRotate = true
+		blockIndicator.Visible = false
+		return
+	end
+
+	local target = getNearestHumanoid()
+	if not target then
+		if hasTarget then
+			humanoid.AutoRotate = true
+			hasTarget = false
+		end
+		return
+	end
+
+	local targetRoot = target:FindFirstChild("HumanoidRootPart")
+	if not targetRoot then return end
+
+	hasTarget = true
+	humanoid.AutoRotate = false
+
+	local velocity = targetRoot.Velocity
+	if velocity.Magnitude > MAX_VELOCITY then
+		velocity = Vector3.zero
+	end
+
+	local predictionTime = DEFAULT_PREDICT_TIME
+	local smoothness = SMOOTHNESS
+
+	local liveTarget = Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(target.Name)
+	if liveTarget then
+		if liveTarget:GetAttribute("_JustDashed") ~= nil then
+			predictionTime = DASH_PREDICT_TIME
+			smoothness = 0
+		elseif liveTarget:GetAttribute("Running") == true then
+			predictionTime = RUN_PREDICT_TIME
+		end
+	end
+
+	local predictedPos = targetRoot.Position + (velocity * predictionTime)
+	local lookAtPos = Vector3.new(predictedPos.X, rootPart.Position.Y, predictedPos.Z)
+	local desired = CFrame.lookAt(rootPart.Position, lookAtPos)
+	rootPart.CFrame = rootPart.CFrame:Lerp(desired, smoothness)
+end)
+
+-- 🔐 Ragdoll Control
+local function updateRagdollState(ragdollPresent)
+	isRagdolled = ragdollPresent
+	scriptActive = not ragdollPresent
+
+	if not scriptActive then
+		if humanoid then humanoid.AutoRotate = false end
+		if blockIndicator then blockIndicator.Visible = false end
+	end
+end
+
+-- 👀 Watch for Ragdoll
+local function setupRagdollWatcher()
+	local live = getLiveModel()
+	if not live then return end
+
+	updateRagdollState(live:FindFirstChild("Ragdoll") ~= nil)
+
+	live.ChildAdded:Connect(function(child)
+		if child.Name == "Ragdoll" then
+			updateRagdollState(true)
+		end
+	end)
+
+	live.ChildRemoved:Connect(function(child)
+		if child.Name == "Ragdoll" then
+			updateRagdollState(false)
+		end
+	end)
+end
+
+-- 🧍 Respawn Support (fix stuck facing old direction)
+player.CharacterAdded:Connect(function(char)
+	character = char
+	humanoid = character:WaitForChild("Humanoid")
+	rootPart = character:WaitForChild("HumanoidRootPart")
+
+	-- 🧼 Reset state
+	hasTarget = false
+	scriptActive = true
+	isRagdolled = false
+
+	if humanoid then
+		humanoid.AutoRotate = true -- ✅ Let player rotate again
+	end
+
+	if blockIndicator then
+		blockIndicator.Visible = false
+	end
+
+	-- Re-setup ragdoll watcher
+	task.delay(0.5, function()
+		setupRagdollWatcher()
+	end)
+end)
+
+-- Initial ragdoll watcher setup
+task.spawn(function()
+	repeat task.wait() until getLiveModel()
+	setupRagdollWatcher()
+end)
+
+
+--// Script 4: Dashers
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Create GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "QClickGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+-- Create Button
+local button = Instance.new("TextButton")
+button.Name = "QButton"
+button.Size = UDim2.new(0, 40, 0, 40)
+button.Position = UDim2.new(1, -50, 0.5, -20)
+button.BackgroundColor3 = Color3.new(0, 0, 0)
+button.TextColor3 = Color3.new(1, 1, 1)
+button.Text = "Q"
+button.Active = true
+button.Draggable = true
+button.Parent = screenGui
+
+-- Function to simulate Q press
+local function simulateQ()
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+end
+
+-- Click GUI to simulate Q
+button.MouseButton1Click:Connect(simulateQ)
+
+-- Spam Q while E is held
+local spamming = false
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.E and not spamming then
+        spamming = true
+        task.spawn(function()
+            while spamming do
+                simulateQ()
+                task.wait(0.05) -- 20 Qs per second
+            end
+        end)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.E then
+        spamming = false
+    end
+end)
+
+
+--// Script 5: dash reset
+
+local plr = game:GetService("Players").LocalPlayer
+local uis = game:GetService("UserInputService")
+local stgui = game:GetService("StarterGui")
+
+local frontDashArgs = {
+	[1] = {
+		["Dash"] = Enum.KeyCode.W,
+		["Key"] = Enum.KeyCode.Q,
+		["Goal"] = "KeyPress"
+	}
+}
+
+local function frontDash()
+	plr.Character.Communicate:FireServer(unpack(frontDashArgs))
+end
+
+local function noEndlagSetup(char)
+	uis.InputBegan:Connect(function(input, t)
+		if t then return end
+		
+		if input.KeyCode == Enum.KeyCode.Q and not uis:IsKeyDown(Enum.KeyCode.D) and not uis:IsKeyDown(Enum.KeyCode.A) and not uis:IsKeyDown(Enum.KeyCode.S) and char:FindFirstChild("UsedDash") then
+			frontDash()
+		end
+	end)
+end
+
+local function stopAnimation(char, animationId)
+    local humanoid = char:FindFirstChildWhichIsA("Humanoid")
+    if humanoid then
+        local animator = humanoid:FindFirstChildWhichIsA("Animator")
+        if animator then
+            for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+                if track.Animation and track.Animation.AnimationId == "rbxassetid://" .. tostring(animationId) then
+                    track:Stop()
+                end
+            end
+        end
+    end
+end
+
+local function isAnimationRunning(char, animationId)
+	local humanoid = char:FindFirstChildWhichIsA("Humanoid")
+    if humanoid then
+        local animator = humanoid:FindFirstChildWhichIsA("Animator")
+        if animator then
+            for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+                if track.Animation and track.Animation.AnimationId == "rbxassetid://" .. tostring(animationId) then
+					return true
+				else
+					return false
+                end
+            end
+        end
+    end
+end
+
+local function emoteDashSetup(char)
+	local hrp = char:WaitForChild("HumanoidRootPart")
+	uis.InputBegan:Connect(function(input, t)
+		if t then return end
+		
+		if input.KeyCode == Enum.KeyCode.Q and not uis:IsKeyDown(Enum.KeyCode.W) and not uis:IsKeyDown(Enum.KeyCode.S) and not isAnimationRunning(char, 10491993682) --[[backdash]] then
+			local vel = hrp:FindFirstChild("dodgevelocity")
+			if vel then
+				vel:Destroy()
+				stopAnimation(char, 10480793962) -- side dash right
+				stopAnimation(char, 10480796021) -- side dash left
+			end
+		end
+	end)
+end
+
+if plr.Character then
+	noEndlagSetup(plr.Character)
+	emoteDashSetup(plr.Character)
+end
+
+plr.CharacterAdded:Connect(emoteDashSetup)
+plr.CharacterAdded:Connect(noEndlagSetup)
+
+if not getgenv().DisableNotification then
+	stgui:SetCore("SendNotification", {
+		Title = "[Skidded loaded] made by Alex",
+		Icon = "rbxassetid://13333189503",
+		Text = "Fuck ego's",
+		Duration = 5,
+		Button1 = "Dismiss",
+		Callback = function() end
+	})
+end
+
+
+
