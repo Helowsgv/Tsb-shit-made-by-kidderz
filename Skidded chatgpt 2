@@ -801,3 +801,68 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 end)
 
+
+--// Script 8: forward
+
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local hrp = character:WaitForChild("HumanoidRootPart")
+
+local lastM1ingExists = false
+local SAFE_DISTANCE = 4 -- stud radius
+
+-- Move forward by 1 stud in the direction the character is facing
+local function moveForward1Stud()
+	if not hrp then return end
+	hrp.CFrame = hrp.CFrame + hrp.CFrame.LookVector.Unit
+end
+
+-- Check if any other player is within 0–4 studs
+local function isTooCloseToEnemy()
+	local liveFolder = Workspace:FindFirstChild("Live")
+	if not liveFolder then return false end
+
+	for _, model in ipairs(liveFolder:GetChildren()) do
+		if model:IsA("Model") and model.Name ~= player.Name then
+			local enemyHRP = model:FindFirstChild("HumanoidRootPart")
+			if enemyHRP then
+				local distance = (hrp.Position - enemyHRP.Position).Magnitude
+				if distance <= SAFE_DISTANCE then
+					return true -- too close, block movement
+				end
+			end
+		end
+	end
+
+	return false -- no one close
+end
+
+-- Per-frame check
+RunService.RenderStepped:Connect(function()
+	local liveFolder = Workspace:FindFirstChild("Live")
+	if not liveFolder then return end
+
+	local myModel = liveFolder:FindFirstChild(player.Name)
+	if not myModel then return end
+
+	local m1ingExists = myModel:FindFirstChild("M1ing") ~= nil
+
+	-- Move only when M1ing appears and we're not near an enemy
+	if m1ingExists and not lastM1ingExists and not isTooCloseToEnemy() then
+		moveForward1Stud()
+	end
+
+	lastM1ingExists = m1ingExists
+end)
+
+-- Reset on respawn
+player.CharacterAdded:Connect(function(char)
+	character = char
+	hrp = character:WaitForChild("HumanoidRootPart")
+	lastM1ingExists = false
+end)
