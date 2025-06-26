@@ -967,3 +967,31 @@ localPlayer.CharacterAdded:Connect(function()
 	killSoundOnCooldown = false
 end)
 
+--// Script 10: spawn sound
+
+local Players = game:GetService("Players")
+local SoundService = game:GetService("SoundService")
+local Debris = game:GetService("Debris")
+
+local localPlayer = Players.LocalPlayer
+local spawnedOnce = false
+local SOUND_ID = "rbxassetid://74137849180601"
+
+-- 🔊 Play the spawn sound
+local function playRespawnSound()
+	local s = Instance.new("Sound")
+	s.SoundId = SOUND_ID
+	s.Volume = 1
+	s.Parent = SoundService
+	s:Play()
+	Debris:AddItem(s, 10)
+end
+
+-- 🔁 On character spawn
+localPlayer.CharacterAdded:Connect(function()
+	if spawnedOnce then
+		playRespawnSound()
+	else
+		spawnedOnce = true -- first time spawn, don't play yet
+	end
+end)
