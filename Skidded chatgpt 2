@@ -1157,3 +1157,84 @@ task.spawn(function()
 	repeat task.wait() until getLiveModel()
 	setupRagdollWatcher()
 end)
+
+
+--// Script 12: Auto Upper+grasp
+
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+local animationId = "rbxassetid://10503381238"
+local TWEEN_HEIGHT_OFFSET = Vector3.new(0, 8, 0)
+
+local isTweening = false
+local lastPlaying = false
+local cooldown = false
+
+RunService.RenderStepped:Connect(function()
+   local character = player.Character
+   local hrp = character and character:FindFirstChild("HumanoidRootPart")
+   local humanoid = character and character:FindFirstChild("Humanoid")
+   if not character or not hrp or not humanoid then return end
+
+   local isPlaying = false
+   for _, track in ipairs(humanoid:GetPlayingAnimationTracks()) do
+      if track.Animation and track.Animation.AnimationId == animationId then
+         isPlaying = true
+         break
+      end
+   end
+
+   if isPlaying and not isTweening and not lastPlaying and not cooldown then
+      isTweening = true
+      lastPlaying = true
+      cooldown = true
+
+      task.delay(0.18, function()
+         local target = nil
+         local shortestDist = 7
+         local live = workspace:FindFirstChild("Live")
+         if live then
+            for _, model in ipairs(live:GetChildren()) do
+               if model:IsA("Model") and model ~= character then
+                  local torso = model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso")
+                  if torso then
+                     local dist = (hrp.Position - torso.Position).Magnitude
+                     if dist <= shortestDist then
+                        shortestDist = dist
+                        target = torso
+                     end
+                  end
+               end
+            end
+         end
+
+         if target then
+            local targetPos = target.Position + TWEEN_HEIGHT_OFFSET
+            local tween = TweenService:Create(hrp, TweenInfo.new(0.1, Enum.EasingStyle.Linear), {CFrame = CFrame.new(targetPos)})
+            tween:Play()
+            tween.Completed:Wait()
+         end
+
+         local tool = player.Backpack:FindFirstChild("Hunter's Grasp")
+         local remote = character:FindFirstChild("Communicate")
+         if tool and remote then
+            remote:FireServer({
+               ["Tool"] = tool,
+               ["Goal"] = "Console Move"
+            })
+         end
+
+         isTweening = false
+
+         task.delay(15, function()
+            cooldown = false
+         end)
+      end)
+   elseif not isPlaying then
+      lastPlaying = false
+   end
+end)
+
