@@ -1012,115 +1012,148 @@ local rootPart = character:WaitForChild("HumanoidRootPart")
 
 -- CONFIG
 local MAX_DISTANCE = 30
-local MAX_VELOCITY = 100
-local PREDICTION_TIME = 0.25
+local SLOWED_TIMEOUT = 0.6
+local STARE_DURATION = 0.5 -- 🔧 Staring duration for all TRUE combos
 
 -- STATE
 local isSHeld = false
 local isRagdolled = false
-local shiftlockEnabled = false
+local trueComboTriggered = false
+local staringUntil = 0
 
 -- 🔍 Find nearest target
 local function getNearestTarget()
-    local live = Workspace:FindFirstChild("Live")
-    if not live then return nil end
+	local live = Workspace:FindFirstChild("Live")
+	if not live then return nil end
 
-    local closest, shortest = nil, MAX_DISTANCE
+	local closest, shortest = nil, MAX_DISTANCE
 
-    for _, model in ipairs(live:GetChildren()) do
-        if model:IsA("Model") and model.Name ~= player.Name then
-            local hrp = model:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                local dist = (rootPart.Position - hrp.Position).Magnitude
-                if dist < shortest then
-                    shortest = dist
-                    closest = hrp
-                end
-            end
-        end
-    end
+	for _, model in ipairs(live:GetChildren()) do
+		if model:IsA("Model") and model.Name ~= player.Name then
+			local hrp = model:FindFirstChild("HumanoidRootPart")
+			if hrp then
+				local dist = (rootPart.Position - hrp.Position).Magnitude
+				if dist < shortest then
+					shortest = dist
+					closest = hrp
+				end
+			end
+		end
+	end
 
-    return closest
+	return closest
 end
 
 -- 🟢 Simulate Q press
 local function pressQ()
-    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
-    task.wait(0.05)
-    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+	VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+	task.wait(0.05)
+	VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+end
+
+-- 🧠 Slowed Checker
+local function getLiveModel()
+	local live = Workspace:FindFirstChild("Live")
+	return live and live:FindFirstChild(player.Name)
+end
+
+local function hasSlowed()
+	local model = getLiveModel()
+	return model and model:FindFirstChild("Slowed") ~= nil
+end
+
+local function waitForSlowed(timeout)
+	local elapsed = 0
+	while elapsed < timeout do
+		if hasSlowed() then return true end
+		task.wait(0.05)
+		elapsed += 0.05
+	end
+	return false
 end
 
 -- 👀 Ragdoll Watcher
-local function getLiveModel()
-    local live = Workspace:FindFirstChild("Live")
-    return live and live:FindFirstChild(player.Name)
-end
-
 local function updateRagdollState(state)
-    isRagdolled = state
+	isRagdolled = state
 end
 
 local function setupRagdollWatcher()
-    local live = getLiveModel()
-    if not live then return end
+	local live = getLiveModel()
+	if not live then return end
 
-    updateRagdollState(live:FindFirstChild("Ragdoll") ~= nil)
+	updateRagdollState(live:FindFirstChild("Ragdoll") ~= nil)
 
-    live.ChildAdded:Connect(function(child)
-        if child.Name == "Ragdoll" then
-            updateRagdollState(true)
-        end
-    end)
+	live.ChildAdded:Connect(function(child)
+		if child.Name == "Ragdoll" then
+			updateRagdollState(true)
+		end
+	end)
 
-    live.ChildRemoved:Connect(function(child)
-        if child.Name == "Ragdoll" then
-            updateRagdollState(false)
-        end
-    end)
+	live.ChildRemoved:Connect(function(child)
+		if child.Name == "Ragdoll" then
+			updateRagdollState(false)
+		end
+	end)
 end
 
--- 🎮 Key Input: S + 1–4 triggers Q
+-- 🎮 Key Input: S + 1–4 triggers Q and checks for "true" combo
 UserInputService.InputBegan:Connect(function(input, processed)
-    if processed then return end
+	if processed then return end
 
-    if input.KeyCode == Enum.KeyCode.S then
-        isSHeld = true
-    end
+	if input.KeyCode == Enum.KeyCode.S then
+		isSHeld = true
+	end
 
-    local numberKeys = {
-        [Enum.KeyCode.One] = true,
-        [Enum.KeyCode.Two] = true,
-        [Enum.KeyCode.Three] = true,
-        [Enum.KeyCode.Four] = true,
-    }
+	local numberKeys = {
+		[Enum.KeyCode.One] = true,
+		[Enum.KeyCode.Two] = true,
+		[Enum.KeyCode.Three] = true,
+		[Enum.KeyCode.Four] = true,
+	}
 
-    if isSHeld and numberKeys[input.KeyCode] then
-        local target = getNearestTarget()
-        if target then
-            pressQ()  -- Simulate Q press
-        end
-    end
+	if numberKeys[input.KeyCode] and isSHeld then
+		pressQ()
+
+		task.spawn(function()
+			trueComboTriggered = false
+			if waitForSlowed(SLOWED_TIMEOUT) then
+				trueComboTriggered = true
+				staringUntil = tick() + STARE_DURATION
+			end
+		end)
+	end
 end)
 
 UserInputService.InputEnded:Connect(function(input)
-    if input.KeyCode == Enum.KeyCode.S then
-        isSHeld = false
-    end
+	if input.KeyCode == Enum.KeyCode.S then
+		isSHeld = false
+	end
 end)
 
 -- ♻️ Respawn handler
 player.CharacterAdded:Connect(function(char)
-    character = char
-    humanoid = character:WaitForChild("Humanoid")
-    rootPart = character:WaitForChild("HumanoidRootPart")
-    isSHeld = false
-    isRagdolled = false
-    task.delay(0.5, setupRagdollWatcher)
+	character = char
+	humanoid = character:WaitForChild("Humanoid")
+	rootPart = character:WaitForChild("HumanoidRootPart")
+	isSHeld = false
+	isRagdolled = false
+	task.delay(0.5, setupRagdollWatcher)
+end)
+
+-- 🔄 Instantly face nearest enemy horizontally when in stare window
+RunService.RenderStepped:Connect(function()
+	if tick() > staringUntil then return end
+
+	local target = getNearestTarget()
+	if not target then return end
+
+	local selfPos = rootPart.Position
+	local targetPos = Vector3.new(target.Position.X, selfPos.Y, target.Position.Z)
+	rootPart.CFrame = CFrame.new(selfPos, targetPos)
 end)
 
 -- Initial setup
 task.spawn(function()
-    repeat task.wait() until getLiveModel()
-    setupRagdollWatcher()
+	repeat task.wait() until getLiveModel()
+	setupRagdollWatcher()
 end)
-
