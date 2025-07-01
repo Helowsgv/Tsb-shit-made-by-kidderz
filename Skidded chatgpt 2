@@ -1090,5 +1090,142 @@ end)
 
 --// Script 12: Auto Upper+grasp
 
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 
+local player = Players.LocalPlayer
+local animationId = "rbxassetid://10503381238"
+local TWEEN_HEIGHT_OFFSET = Vector3.new(0, 8, 0)
+
+local isTweening = false
+local lastPlaying = false
+local cooldown = false
+
+local currentTargetName = nil
+local currentTargetModel = nil
+local currentTargetTorso = nil
+
+local lastJumpValue = nil
+local lastM1FireValue = nil
+local jumpBeforeCombo5 = false
+
+local function waitForRagdoll(model, timeout)
+   local t = 0
+   while t < timeout do
+      if model and model:FindFirstChild("Ragdoll") then return true end
+      t += 0.05
+      task.wait(0.05)
+   end
+   return false
+end
+
+-- 🎯 Track LastM1Hitted
+spawn(function()
+   while true do
+      local live = workspace:FindFirstChild("Live")
+      local myChar = live and live:FindFirstChild(player.Name)
+      if myChar then
+         local attr = myChar:GetAttribute("LastM1Hitted")
+         if attr and attr ~= "" then
+            local username = attr:split(";;")[1]
+            if username ~= currentTargetName then
+               print("[DEBUG] New target:", username)
+               currentTargetName = username
+            end
+            local model = live:FindFirstChild(username)
+            if model then
+               local torso = model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso")
+               if torso then
+                  currentTargetModel = model
+                  currentTargetTorso = torso
+               end
+            end
+         end
+      end
+      task.wait(0.1)
+   end
+end)
+
+RunService.RenderStepped:Connect(function()
+   local live = workspace:FindFirstChild("Live")
+   local character = player.Character
+   local hrp = character and character:FindFirstChild("HumanoidRootPart")
+   local humanoid = character and character:FindFirstChild("Humanoid")
+   local myChar = live and live:FindFirstChild(player.Name)
+   if not character or not hrp or not humanoid or not myChar then return end
+
+   local combo = myChar:GetAttribute("Combo")
+   local lastJump = myChar:GetAttribute("LastJump")
+   local lastM1Fire = myChar:GetAttribute("LastM1Fire")
+
+   local targetValid = currentTargetModel and currentTargetModel:GetAttribute("LastHit") == player.Name
+   local jumpTriggered = lastJump and lastJump ~= lastJumpValue
+   local m1Triggered = lastM1Fire and lastM1Fire ~= lastM1FireValue
+
+   if combo == 4 and jumpTriggered then
+      print("[DEBUG] Jumped at combo 4")
+      jumpBeforeCombo5 = true
+   end
+
+   local isPlaying = false
+   for _, track in ipairs(humanoid:GetPlayingAnimationTracks()) do
+      if track.Animation and track.Animation.AnimationId == animationId then
+         isPlaying = true
+         break
+      end
+   end
+
+   if combo == 5 and isPlaying and m1Triggered and jumpBeforeCombo5 and targetValid and not isTweening and not cooldown then
+      print("[DEBUG] All conditions met. Starting tween...")
+      isTweening = true
+      lastPlaying = true
+      jumpBeforeCombo5 = false
+
+      task.delay(0.05, function()
+         local target = currentTargetTorso
+         if target then
+            print("[DEBUG] Tweening to target position")
+            local targetPos = target.Position + TWEEN_HEIGHT_OFFSET
+            local tween = TweenService:Create(hrp, TweenInfo.new(0.1, Enum.EasingStyle.Linear), {CFrame = CFrame.new(targetPos)})
+            tween:Play()
+            tween.Completed:Wait()
+         end
+
+         local usedSkill = false
+         if waitForRagdoll(currentTargetModel, 0.3) then
+            print("[DEBUG] ✅ Ragdoll found — using move")
+            local tool = player.Backpack:FindFirstChild("Hunter's Grasp")
+            local remote = character:FindFirstChild("Communicate")
+            if tool and remote then
+               remote:FireServer({
+                  ["Tool"] = tool,
+                  ["Goal"] = "Console Move"
+               })
+               usedSkill = true
+            else
+               print("[DEBUG] ❌ Tool or remote not found")
+            end
+         else
+            print("[DEBUG] ❌ No Ragdoll — cancel move, no cooldown")
+         end
+
+         if usedSkill then
+            print("[DEBUG] 🔁 Move used. Cooldown begins.")
+            cooldown = true
+            task.delay(15, function()
+               cooldown = false
+               print("[DEBUG] Cooldown ended")
+            end)
+         end
+
+         isTweening = false
+      end)
+   elseif not isPlaying then
+      lastPlaying = false
+   end
+
+   lastJumpValue = lastJump
+   lastM1FireValue = lastM1Fire
+end)
 
