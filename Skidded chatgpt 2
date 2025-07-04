@@ -1101,6 +1101,7 @@ local TWEEN_HEIGHT_OFFSET = Vector3.new(0, 8, 0)
 local isTweening = false
 local lastPlaying = false
 local cooldown = false
+local scriptEnabled = false
 
 local currentTargetName = nil
 local currentTargetModel = nil
@@ -1119,6 +1120,21 @@ local function waitForRagdoll(model, timeout)
    end
    return false
 end
+
+-- 🧠 Check for Character = "Hunter"
+spawn(function()
+   while true do
+      local live = workspace:FindFirstChild("Live")
+      local myChar = live and live:FindFirstChild(player.Name)
+      if myChar then
+         local charType = myChar:GetAttribute("Character")
+         scriptEnabled = (charType == "Hunter")
+      else
+         scriptEnabled = false
+      end
+      task.wait(0.1)
+   end
+end)
 
 -- 🎯 Track LastM1Hitted
 spawn(function()
@@ -1148,6 +1164,8 @@ spawn(function()
 end)
 
 RunService.RenderStepped:Connect(function()
+   if not scriptEnabled then return end
+
    local live = workspace:FindFirstChild("Live")
    local character = player.Character
    local hrp = character and character:FindFirstChild("HumanoidRootPart")
