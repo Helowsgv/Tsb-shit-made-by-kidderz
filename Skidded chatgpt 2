@@ -940,15 +940,16 @@ local humanoid = character:WaitForChild("Humanoid")
 local rootPart = character:WaitForChild("HumanoidRootPart")
 
 -- CONFIG
+local STARE_DURATION = 1
 local MAX_DISTANCE = 30
+local MAX_VELOCITY = 100
+local PREDICTION_TIME = 0.25
 local SLOWED_TIMEOUT = 0.6
-local STARE_DURATION = 0.5 -- 🔧 Staring duration for all TRUE combos
+local FREEZE_TIMEOUT = 0.5
 
 -- STATE
 local isSHeld = false
 local isRagdolled = false
-local trueComboTriggered = false
-local staringUntil = 0
 
 -- 🔍 Find nearest target
 local function getNearestTarget()
@@ -956,7 +957,6 @@ local function getNearestTarget()
 	if not live then return nil end
 
 	local closest, shortest = nil, MAX_DISTANCE
-
 	for _, model in ipairs(live:GetChildren()) do
 		if model:IsA("Model") and model.Name ~= player.Name then
 			local hrp = model:FindFirstChild("HumanoidRootPart")
@@ -980,52 +980,108 @@ local function pressQ()
 	VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
 end
 
--- 🧠 Slowed Checker
+-- 👁️ Method A: frame-by-frame staring for Skill 2 and 3
+local function stareMethodA(targetRoot)
+	humanoid.AutoRotate = false
+	local elapsed = 0
+	local conn
+
+	conn = RunService.RenderStepped:Connect(function(dt)
+		if isRagdolled then
+			humanoid.AutoRotate = true
+			conn:Disconnect()
+			return
+		end
+
+		elapsed += dt
+		if elapsed >= STARE_DURATION then
+			humanoid.AutoRotate = true
+			conn:Disconnect()
+			return
+		end
+
+		local velocity = targetRoot.Velocity
+		if velocity.Magnitude > MAX_VELOCITY then
+			velocity = Vector3.zero
+		end
+
+		local predicted = targetRoot.Position + velocity * PREDICTION_TIME
+		local lookAt = Vector3.new(predicted.X, rootPart.Position.Y, predicted.Z)
+		rootPart.CFrame = CFrame.lookAt(rootPart.Position, lookAt)
+	end)
+end
+
+-- 👁️ Method B: single predictive rotation for Skill 1 and 4
+local function stareMethodB(targetRoot)
+	if not targetRoot then return end
+
+	humanoid.AutoRotate = false
+	local velocity = targetRoot.Velocity
+	if velocity.Magnitude > MAX_VELOCITY then
+		velocity = Vector3.zero
+	end
+
+	local predicted = targetRoot.Position + velocity * PREDICTION_TIME
+	local lookAt = Vector3.new(predicted.X, rootPart.Position.Y, predicted.Z)
+	rootPart.CFrame = CFrame.lookAt(rootPart.Position, lookAt)
+
+	task.delay(STARE_DURATION, function()
+		humanoid.AutoRotate = true
+	end)
+end
+
+-- 🧠 Ragdoll state watcher
 local function getLiveModel()
 	local live = Workspace:FindFirstChild("Live")
 	return live and live:FindFirstChild(player.Name)
-end
-
-local function hasSlowed()
-	local model = getLiveModel()
-	return model and model:FindFirstChild("Slowed") ~= nil
-end
-
-local function waitForSlowed(timeout)
-	local elapsed = 0
-	while elapsed < timeout do
-		if hasSlowed() then return true end
-		task.wait(0.05)
-		elapsed += 0.05
-	end
-	return false
-end
-
--- 👀 Ragdoll Watcher
-local function updateRagdollState(state)
-	isRagdolled = state
 end
 
 local function setupRagdollWatcher()
 	local live = getLiveModel()
 	if not live then return end
 
-	updateRagdollState(live:FindFirstChild("Ragdoll") ~= nil)
+	isRagdolled = live:FindFirstChild("Ragdoll") ~= nil
 
-	live.ChildAdded:Connect(function(child)
-		if child.Name == "Ragdoll" then
-			updateRagdollState(true)
-		end
+	live.ChildAdded:Connect(function(c)
+		if c.Name == "Ragdoll" then isRagdolled = true end
 	end)
-
-	live.ChildRemoved:Connect(function(child)
-		if child.Name == "Ragdoll" then
-			updateRagdollState(false)
-		end
+	live.ChildRemoved:Connect(function(c)
+		if c.Name == "Ragdoll" then isRagdolled = false end
 	end)
 end
 
--- 🎮 Key Input: S + 1–4 triggers Q and checks for "true" combo
+-- ✅ True combo checker
+local function hasSlowed()
+	local model = getLiveModel()
+	return model and model:FindFirstChild("Slowed")
+end
+
+local function hasFreeze()
+	local model = getLiveModel()
+	return model and model:FindFirstChild("Freeze")
+end
+
+local function waitForSlowed(timeout)
+	local t = 0
+	while t < timeout do
+		if hasSlowed() then return true end
+		task.wait(0.05)
+		t += 0.05
+	end
+	return false
+end
+
+local function waitForFreeze(timeout)
+	local t = 0
+	while t < timeout do
+		if hasFreeze() then return true end
+		task.wait(0.05)
+		t += 0.05
+	end
+	return false
+end
+
+-- 🎮 Key input logic
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed then return end
 
@@ -1033,21 +1089,35 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		isSHeld = true
 	end
 
+	local key = input.KeyCode
 	local numberKeys = {
 		[Enum.KeyCode.One] = true,
 		[Enum.KeyCode.Two] = true,
 		[Enum.KeyCode.Three] = true,
-		[Enum.KeyCode.Four] = true,
+		[Enum.KeyCode.Four] = true
 	}
 
-	if numberKeys[input.KeyCode] and isSHeld then
+	if isSHeld and numberKeys[key] then
+		local target = getNearestTarget()
+		if not target then return end
+
 		pressQ()
 
 		task.spawn(function()
-			trueComboTriggered = false
-			if waitForSlowed(SLOWED_TIMEOUT) then
-				trueComboTriggered = true
-				staringUntil = tick() + STARE_DURATION
+			local trueCombo = false
+
+			if key == Enum.KeyCode.One or key == Enum.KeyCode.Four then
+				trueCombo = waitForFreeze(FREEZE_TIMEOUT)
+			elseif key == Enum.KeyCode.Two or key == Enum.KeyCode.Three then
+				trueCombo = waitForSlowed(SLOWED_TIMEOUT)
+			end
+
+			if trueCombo then
+				if key == Enum.KeyCode.One or key == Enum.KeyCode.Four then
+					stareMethodB(target)
+				else
+					stareMethodA(target)
+				end
 			end
 		end)
 	end
@@ -1059,7 +1129,7 @@ UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
--- ♻️ Respawn handler
+-- Respawn handler
 player.CharacterAdded:Connect(function(char)
 	character = char
 	humanoid = character:WaitForChild("Humanoid")
@@ -1069,23 +1139,8 @@ player.CharacterAdded:Connect(function(char)
 	task.delay(0.5, setupRagdollWatcher)
 end)
 
--- 🔄 Instantly face nearest enemy horizontally when in stare window
-RunService.RenderStepped:Connect(function()
-	if tick() > staringUntil then return end
-
-	local target = getNearestTarget()
-	if not target then return end
-
-	local selfPos = rootPart.Position
-	local targetPos = Vector3.new(target.Position.X, selfPos.Y, target.Position.Z)
-	rootPart.CFrame = CFrame.new(selfPos, targetPos)
-end)
-
--- Initial setup
-task.spawn(function()
-	repeat task.wait() until getLiveModel()
-	setupRagdollWatcher()
-end)
+-- Start
+setupRagdollWatcher()
 
 
 --// Script 12: Auto Upper+grasp
