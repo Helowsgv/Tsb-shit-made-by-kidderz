@@ -1157,6 +1157,7 @@ local isTweening = false
 local lastPlaying = false
 local cooldown = false
 local scriptEnabled = false
+local canTween = false -- new variable to control tweening availability
 
 local currentTargetName = nil
 local currentTargetModel = nil
@@ -1249,7 +1250,9 @@ RunService.RenderStepped:Connect(function()
       end
    end
 
-   if combo == 5 and isPlaying and m1Triggered and jumpBeforeCombo5 and targetValid and not isTweening and not cooldown then
+   canTween = not cooldown -- update tweening availability based on cooldown
+
+   if combo == 5 and isPlaying and m1Triggered and jumpBeforeCombo5 and targetValid and not isTweening and canTween then
       print("[DEBUG] All conditions met. Starting tween...")
       isTweening = true
       lastPlaying = true
@@ -1301,6 +1304,7 @@ RunService.RenderStepped:Connect(function()
    lastJumpValue = lastJump
    lastM1FireValue = lastM1Fire
 end)
+
 
 --// Script 13: mods
 
