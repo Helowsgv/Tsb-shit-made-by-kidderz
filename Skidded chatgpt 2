@@ -203,7 +203,6 @@ local DASH_PREDICT_TIME = 0.4
 
 -- State
 local isRagdolled = false
-local hasTarget = false
 local scriptActive = true
 
 -- ✅ GUI Checkmark
@@ -275,8 +274,8 @@ end
 -- 🔁 Frame Update
 RunService.RenderStepped:Connect(function()
 	if not scriptActive or not isAlive() then
-		if humanoid then humanoid.AutoRotate = false end
-		if blockIndicator then blockIndicator.Visible = false end
+		humanoid.AutoRotate = false
+		blockIndicator.Visible = false
 		return
 	end
 
@@ -289,60 +288,73 @@ RunService.RenderStepped:Connect(function()
 
 	local target = getNearestHumanoid()
 	if not target then
-		if hasTarget then
-			humanoid.AutoRotate = true
-			hasTarget = false
-		end
+		humanoid.AutoRotate = true
 		return
 	end
 
 	local targetRoot = target:FindFirstChild("HumanoidRootPart")
 	if not targetRoot then return end
 
-	hasTarget = true
-	humanoid.AutoRotate = false
+	humanoid.AutoRotate = false -- 🔒 Always force off while blocking
 
 	local velocity = targetRoot.Velocity
 	if velocity.Magnitude > MAX_VELOCITY then
 		velocity = Vector3.zero
 	end
 
-	local predictionTime = DEFAULT_PREDICT_TIME
-	local smoothness = SMOOTHNESS
+	-- ✅ Distance-based priority logic
+	local distance = (targetRoot.Position - rootPart.Position).Magnitude
 
-	local liveTarget = Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(target.Name)
-	if liveTarget then
-		if liveTarget:GetAttribute("_JustDashed") ~= nil then
-			predictionTime = DASH_PREDICT_TIME
-			smoothness = 0
-		elseif liveTarget:GetAttribute("Running") == true then
-			predictionTime = RUN_PREDICT_TIME
+	local predictionTime
+	local smoothness
+
+	if distance <= 8 then
+		predictionTime = 0
+		smoothness = 0
+	else
+		predictionTime = DEFAULT_PREDICT_TIME
+		smoothness = SMOOTHNESS
+
+		local liveTarget = Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(target.Name)
+		if liveTarget then
+			if liveTarget:GetAttribute("_JustDashed") ~= nil then
+				predictionTime = DASH_PREDICT_TIME
+				smoothness = 0
+			elseif liveTarget:GetAttribute("Running") == true then
+				predictionTime = RUN_PREDICT_TIME
+			end
 		end
 	end
 
 	local predictedPos = targetRoot.Position + (velocity * predictionTime)
 	local lookAtPos = Vector3.new(predictedPos.X, rootPart.Position.Y, predictedPos.Z)
 	local desired = CFrame.lookAt(rootPart.Position, lookAtPos)
-	rootPart.CFrame = rootPart.CFrame:Lerp(desired, smoothness)
+
+	if distance <= 8 then
+		-- 🔁 Close range: instant hard lock-on every frame
+		rootPart.CFrame = desired
+	else
+		-- 🌐 Far range: predictive smooth rotation
+		rootPart.CFrame = rootPart.CFrame:Lerp(desired, smoothness)
+	end
 end)
 
--- 🔐 Script control logic (Ragdoll or AbsoluteImmortal disables it)
+-- 🔐 Disable script if Ragdoll or AbsoluteImmortal
 local function updateScriptState()
 	local live = getLiveModel()
 	if not live then return end
 
-	isRagdolled = live:FindFirstChild("Ragdoll") ~= nil
-	local hasAbsoluteImmortal = live:FindFirstChild("AbsoluteImmortal") ~= nil
-
-	scriptActive = not isRagdolled and not hasAbsoluteImmortal
+	local isRagdoll = live:FindFirstChild("Ragdoll") ~= nil
+	local isImmortal = live:FindFirstChild("AbsoluteImmortal") ~= nil
+	scriptActive = not isRagdoll and not isImmortal
 
 	if not scriptActive then
-		if humanoid then humanoid.AutoRotate = false end
-		if blockIndicator then blockIndicator.Visible = false end
+		humanoid.AutoRotate = false
+		blockIndicator.Visible = false
 	end
 end
 
--- 👀 Watch for Ragdoll and AbsoluteImmortal
+-- 👀 Watch for Ragdoll / Immortal
 local function setupRagdollWatcher()
 	local live = getLiveModel()
 	if not live then return end
@@ -362,36 +374,27 @@ local function setupRagdollWatcher()
 	end)
 end
 
--- 🧍 Respawn Support (fix stuck facing old direction)
+-- 🧍 Respawn reset
 player.CharacterAdded:Connect(function(char)
 	character = char
 	humanoid = character:WaitForChild("Humanoid")
 	rootPart = character:WaitForChild("HumanoidRootPart")
 
-	-- 🧼 Reset state
-	hasTarget = false
 	scriptActive = true
-	isRagdolled = false
+	humanoid.AutoRotate = true
+	blockIndicator.Visible = false
 
-	if humanoid then
-		humanoid.AutoRotate = true
-	end
-
-	if blockIndicator then
-		blockIndicator.Visible = false
-	end
-
-	-- Re-setup ragdoll watcher
 	task.delay(0.5, function()
 		setupRagdollWatcher()
 	end)
 end)
 
--- 🔄 Initial watcher setup
+-- 🔄 Initial setup
 task.spawn(function()
 	repeat task.wait() until getLiveModel()
 	setupRagdollWatcher()
 end)
+
 
 
 
