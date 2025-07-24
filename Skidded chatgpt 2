@@ -1317,7 +1317,7 @@ local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:FindFirstChildWhichIsA("Humanoid")
 
 -- ====== TELEPORT WALK SETTINGS ======
-local teleportWalkSpeed = 0.4  -- ← Set your desired speed here
+local teleportWalkSpeed = 0.3  -- ← Set your desired speed here
 local tpwalking = true         -- ← Toggle on/off
 
 -- ====== NOFOG FUNCTIONALITY ======
