@@ -813,16 +813,34 @@ local lastDamageValue = 0
 local killSoundOnCooldown = false
 local recentlyKilled = {}
 
--- 🔊 Kill Sound
-local function playKillSound()
+-- 🔊 Kill sound follows HumanoidRootPart in real-time
+local function playKillSound(targetHRP)
+	if not targetHRP then return end
+
 	local s = Instance.new("Sound")
-	s.SoundId = "rbxassetid://131961137" -- Replace with your sound
-	s.Volume = 1
-	s.Parent = SoundService
+	s.Name = "KillSound"
+	s.SoundId = "rbxassetid://131961137" -- Replace with your sound ID
+	s.Volume = 3
+	s.EmitterSize = 10 -- Radius where sound is at full volume
+	s.RollOffMode = Enum.RollOffMode.InverseTapered -- Smooth distance falloff
+	s.MaxDistance = 250
+	s.Looped = false
+	s.PlayOnRemove = false
+	s.Parent = targetHRP -- Attached directly to HRP so it follows body
+
+	-- Reverb echo effect
+	local reverb = Instance.new("ReverbSoundEffect")
+	reverb.DecayTime = 2
+	reverb.Density = 0.5
+	reverb.Diffusion = 0.9
+	reverb.WetLevel = -10
+	reverb.DryLevel = 0
+	reverb.Parent = s
+
 	s:Play()
 	Debris:AddItem(s, 5)
 
-	-- Start global cooldown (3 seconds)
+	-- Cooldown
 	killSoundOnCooldown = true
 	task.delay(3, function()
 		killSoundOnCooldown = false
@@ -873,10 +891,11 @@ RunService.Heartbeat:Connect(function()
 
 		local humanoid = targetModel:FindFirstChildWhichIsA("Humanoid")
 		local lastHit = targetModel:GetAttribute("LastHit")
+		local hrp = targetModel:FindFirstChild("HumanoidRootPart")
 
 		if lastHit == playerName and humanoid and humanoid.Health <= 0 then
-			if not killSoundOnCooldown and recentlyKilled[targetName] ~= true then
-				playKillSound()
+			if not killSoundOnCooldown and recentlyKilled[targetName] ~= true and hrp then
+				playKillSound(hrp)
 				warn("✅ Kill sound played for:", targetName)
 				recentlyKilled[targetName] = true
 				watchTargetRespawn(targetModel)
@@ -895,6 +914,7 @@ localPlayer.CharacterAdded:Connect(function()
 	recentlyKilled = {}
 	killSoundOnCooldown = false
 end)
+
 
 --// Script 10: spawn sound
 
