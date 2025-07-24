@@ -326,10 +326,15 @@ RunService.RenderStepped:Connect(function()
 	rootPart.CFrame = rootPart.CFrame:Lerp(desired, smoothness)
 end)
 
--- 🔐 Ragdoll Control
-local function updateRagdollState(ragdollPresent)
-	isRagdolled = ragdollPresent
-	scriptActive = not ragdollPresent
+-- 🔐 Script control logic (Ragdoll or AbsoluteImmortal disables it)
+local function updateScriptState()
+	local live = getLiveModel()
+	if not live then return end
+
+	isRagdolled = live:FindFirstChild("Ragdoll") ~= nil
+	local hasAbsoluteImmortal = live:FindFirstChild("AbsoluteImmortal") ~= nil
+
+	scriptActive = not isRagdolled and not hasAbsoluteImmortal
 
 	if not scriptActive then
 		if humanoid then humanoid.AutoRotate = false end
@@ -337,22 +342,22 @@ local function updateRagdollState(ragdollPresent)
 	end
 end
 
--- 👀 Watch for Ragdoll
+-- 👀 Watch for Ragdoll and AbsoluteImmortal
 local function setupRagdollWatcher()
 	local live = getLiveModel()
 	if not live then return end
 
-	updateRagdollState(live:FindFirstChild("Ragdoll") ~= nil)
+	updateScriptState()
 
 	live.ChildAdded:Connect(function(child)
-		if child.Name == "Ragdoll" then
-			updateRagdollState(true)
+		if child.Name == "Ragdoll" or child.Name == "AbsoluteImmortal" then
+			updateScriptState()
 		end
 	end)
 
 	live.ChildRemoved:Connect(function(child)
-		if child.Name == "Ragdoll" then
-			updateRagdollState(false)
+		if child.Name == "Ragdoll" or child.Name == "AbsoluteImmortal" then
+			updateScriptState()
 		end
 	end)
 end
@@ -369,7 +374,7 @@ player.CharacterAdded:Connect(function(char)
 	isRagdolled = false
 
 	if humanoid then
-		humanoid.AutoRotate = true -- ✅ Let player rotate again
+		humanoid.AutoRotate = true
 	end
 
 	if blockIndicator then
@@ -382,11 +387,12 @@ player.CharacterAdded:Connect(function(char)
 	end)
 end)
 
--- Initial ragdoll watcher setup
+-- 🔄 Initial watcher setup
 task.spawn(function()
 	repeat task.wait() until getLiveModel()
 	setupRagdollWatcher()
 end)
+
 
 
 --// Script 4: Dashers
