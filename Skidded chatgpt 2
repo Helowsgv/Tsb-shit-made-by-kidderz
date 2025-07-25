@@ -202,7 +202,6 @@ local RUN_PREDICT_TIME = 0.1
 local DASH_PREDICT_TIME = 0.4
 
 -- State
-local isRagdolled = false
 local scriptActive = true
 
 -- ✅ GUI Checkmark
@@ -242,10 +241,6 @@ local function isBlocking()
 	return value == true
 end
 
-local function isAlive()
-	return humanoid and humanoid.Health > 0
-end
-
 local function getNearestHumanoid()
 	if not scriptActive then return nil end
 	local liveFolder = Workspace:FindFirstChild("Live")
@@ -273,8 +268,17 @@ end
 
 -- 🔁 Frame Update
 RunService.RenderStepped:Connect(function()
-	if not scriptActive or not isAlive() then
-		humanoid.AutoRotate = false
+	-- 🧠 Always refresh current character references
+	if not character or not character:IsDescendantOf(Workspace) then
+		character = player.Character
+		if not character then return end
+	end
+
+	humanoid = character:FindFirstChild("Humanoid")
+	rootPart = character:FindFirstChild("HumanoidRootPart")
+
+	if not scriptActive or not humanoid or not rootPart or humanoid.Health <= 0 then
+		if humanoid then humanoid.AutoRotate = false end
 		blockIndicator.Visible = false
 		return
 	end
@@ -295,14 +299,13 @@ RunService.RenderStepped:Connect(function()
 	local targetRoot = target:FindFirstChild("HumanoidRootPart")
 	if not targetRoot then return end
 
-	humanoid.AutoRotate = false -- 🔒 Always force off while blocking
+	humanoid.AutoRotate = false
 
 	local velocity = targetRoot.Velocity
 	if velocity.Magnitude > MAX_VELOCITY then
 		velocity = Vector3.zero
 	end
 
-	-- ✅ Distance-based priority logic
 	local distance = (targetRoot.Position - rootPart.Position).Magnitude
 
 	local predictionTime
@@ -331,10 +334,8 @@ RunService.RenderStepped:Connect(function()
 	local desired = CFrame.lookAt(rootPart.Position, lookAtPos)
 
 	if distance <= 8 then
-		-- 🔁 Close range: instant hard lock-on every frame
 		rootPart.CFrame = desired
 	else
-		-- 🌐 Far range: predictive smooth rotation
 		rootPart.CFrame = rootPart.CFrame:Lerp(desired, smoothness)
 	end
 end)
@@ -349,7 +350,9 @@ local function updateScriptState()
 	scriptActive = not isRagdoll and not isImmortal
 
 	if not scriptActive then
-		humanoid.AutoRotate = false
+		if humanoid then
+			humanoid.AutoRotate = false
+		end
 		blockIndicator.Visible = false
 	end
 end
@@ -374,18 +377,23 @@ local function setupRagdollWatcher()
 	end)
 end
 
--- 🧍 Respawn reset
+-- 🧍 Respawn reset (FIXED)
 player.CharacterAdded:Connect(function(char)
+	scriptActive = false -- 🔒 Disable logic temporarily
+
 	character = char
 	humanoid = character:WaitForChild("Humanoid")
 	rootPart = character:WaitForChild("HumanoidRootPart")
 
-	scriptActive = true
-	humanoid.AutoRotate = true
 	blockIndicator.Visible = false
+	humanoid.AutoRotate = true
 
-	task.delay(0.5, function()
+	-- ✅ Re-enable script after full character + Live model is ready
+	task.spawn(function()
+		repeat task.wait() until getLiveModel() ~= nil
+		task.wait(0.5)
 		setupRagdollWatcher()
+		scriptActive = true
 	end)
 end)
 
@@ -394,7 +402,6 @@ task.spawn(function()
 	repeat task.wait() until getLiveModel()
 	setupRagdollWatcher()
 end)
-
 
 
 
