@@ -1,0 +1,93 @@
+--// Script 1: No ss
+-- ✅ Universal Anti Screen Shake
+-- Works by hooking the game's shared.addshake and applying fallbacks.
+
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local cam = workspace.CurrentCamera
+
+-- no-op used everywhere
+local function noop(...) return nil end
+
+-- Safely get environments
+local RENV = getrenv and getrenv() or _G
+local GENV = getgenv and getgenv() or _G
+
+-- Try to hook a function (if executor supports hookfunction)
+local function try_hook(fn)
+    if typeof(fn) == "function" then
+        local ok = false
+        if hookfunction then
+            local s, err = pcall(function()
+                hookfunction(fn, noop)
+            end)
+            ok = s
+        end
+        return ok
+    end
+    return false
+end
+
+-- Block shared.addshake in a specific environment table (RENv or GEnv)
+local function block_in_env(env)
+    if type(env) ~= "table" then return false end
+    local sharedTbl = env.shared
+    if type(sharedTbl) ~= "table" then return false end
+
+    local addshake = rawget(sharedTbl, "addshake")
+    if typeof(addshake) == "function" then
+        -- First try a true hook (affects cached references too)
+        if try_hook(addshake) then
+            warn("[AntiShake] Hooked function in env")
+            return true
+        end
+        -- Fallback: overwrite the field (won't affect cached refs, but still helps)
+        rawset(sharedTbl, "addshake", noop)
+        warn("[AntiShake] Overwrote env.shared.addshake")
+        return true
+    end
+    return false
+end
+
+-- Initial pass in multiple envs
+local hooked = false
+hooked = block_in_env(RENV) or hooked
+hooked = block_in_env(GENV) or hooked
+hooked = block_in_env(_G) or hooked
+
+-- Watcher: if the game sets/changes shared.addshake later, re-block it
+task.spawn(function()
+    while true do
+        block_in_env(RENV)
+        task.wait(0.2)
+    end
+end)
+
+-- Fallback anti-shake for other implementations (e.g., CameraOffset/FOV shakes)
+local defaultFOV = (cam and cam.FieldOfView) or 70
+RunService.RenderStepped:Connect(function()
+    cam = workspace.CurrentCamera or cam
+    if cam then
+        -- Kill FOV pulses
+        if math.abs(cam.FieldOfView - defaultFOV) > 0.5 then
+            cam.FieldOfView = defaultFOV
+        end
+    end
+    -- Kill Humanoid.CameraOffset shakes
+    local char = player and player.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum and hum.CameraOffset.Magnitude > 0 then
+            hum.CameraOffset = Vector3.new()
+        end
+    end
+end)
+
+if hooked then
+    warn("[AntiShake] Active (hooked shared.addshake).")
+else
+    warn("[AntiShake] Fallback only (no shared.addshake found yet).")
+end
+
+
