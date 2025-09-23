@@ -91,3 +91,598 @@ else
 end
 
 
+--// Script 2: death counter notif
+
+-- Death Counter Notifier with Highlight Integration (Persistent after Respawn)
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local Workspace = game:GetService("Workspace")
+
+-- UI setup function
+local function createUI()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "DeathCounterNotifierGUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+    local notificationFrame = Instance.new("Frame")
+    notificationFrame.Name = "NotificationFrame"
+    notificationFrame.Size = UDim2.new(0, 250, 0, 100)
+    notificationFrame.Position = UDim2.new(1, -260, 1, -110)
+    notificationFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    notificationFrame.BackgroundTransparency = 0.3
+    notificationFrame.BorderSizePixel = 0
+    notificationFrame.Visible = false
+    notificationFrame.Parent = screenGui
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, 0, 0.4, 0)
+    titleLabel.Position = UDim2.new(0, 0, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "Death Counter Detected"
+    titleLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextScaled = true
+    titleLabel.Parent = notificationFrame
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, 0, 0.6, 0)
+    nameLabel.Position = UDim2.new(0, 0, 0.4, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = ""
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    nameLabel.Font = Enum.Font.Gotham
+    nameLabel.TextScaled = true
+    nameLabel.Parent = notificationFrame
+
+    return screenGui, notificationFrame, nameLabel
+end
+
+local screenGui, notificationFrame, nameLabel = createUI()
+
+-- Improved highlight using Roblox Highlight object
+local highlightInstances = {}
+
+local function updateHighlight(model, state)
+    if not highlightInstances[model] and state then
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "DeathCounterHighlight"
+        highlight.FillColor = Color3.fromRGB(255, 0, 0)
+        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+        highlight.FillTransparency = 0.5
+        highlight.OutlineTransparency = 0
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Adornee = model
+        highlight.Parent = model
+        highlightInstances[model] = highlight
+    elseif highlightInstances[model] and not state then
+        highlightInstances[model]:Destroy()
+        highlightInstances[model] = nil
+    end
+end
+
+local function monitorDeathCounters()
+    RunService.RenderStepped:Connect(function()
+        local found = false
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                local model = Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(player.Name)
+                if model then
+                    local hasCounter = model:FindFirstChild("Counter") ~= nil
+                    updateHighlight(model, hasCounter)
+
+                    if hasCounter then
+                        found = true
+                        notificationFrame.Visible = true
+                        nameLabel.Text = player.Name
+                    end
+                end
+            end
+        end
+
+        if not found then
+            notificationFrame.Visible = false
+            nameLabel.Text = ""
+        end
+    end)
+end
+
+-- Initial start and persistent respawn connection
+monitorDeathCounters()
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1) -- wait to ensure GUI and workspace are fully ready
+    screenGui:Destroy()
+    screenGui, notificationFrame, nameLabel = createUI()
+end)
+
+--// Script 3: Kill sound
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local SoundService = game:GetService("SoundService")
+local Debris = game:GetService("Debris")
+
+local localPlayer = Players.LocalPlayer
+local playerName = localPlayer.Name
+local liveFolder = Workspace:WaitForChild("Live")
+
+local lastDamageValue = 0
+local killSoundOnCooldown = false
+local recentlyKilled = {}
+
+-- 🔊 Kill sound follows HumanoidRootPart in real-time
+local function playKillSound(targetHRP)
+	if not targetHRP then return end
+
+	local s = Instance.new("Sound")
+	s.Name = "KillSound"
+	s.SoundId = "rbxassetid://131961137" -- Replace with your sound ID
+	s.Volume = 3
+	s.EmitterSize = 10 -- Radius where sound is at full volume
+	s.RollOffMode = Enum.RollOffMode.InverseTapered -- Smooth distance falloff
+	s.MaxDistance = 250
+	s.Looped = false
+	s.PlayOnRemove = false
+	s.Parent = targetHRP -- Attached directly to HRP so it follows body
+
+	-- Reverb echo effect
+	local reverb = Instance.new("ReverbSoundEffect")
+	reverb.DecayTime = 2
+	reverb.Density = 0.5
+	reverb.Diffusion = 0.9
+	reverb.WetLevel = -10
+	reverb.DryLevel = 0
+	reverb.Parent = s
+
+	s:Play()
+	Debris:AddItem(s, 5)
+
+	-- Cooldown
+	killSoundOnCooldown = true
+	task.delay(3, function()
+		killSoundOnCooldown = false
+	end)
+end
+
+-- ♻️ Reset per-target kill flag
+local function watchTargetRespawn(model)
+	local name = model.Name
+	if recentlyKilled[name] == "watching" then return end
+	recentlyKilled[name] = "watching"
+
+	local hum = model:FindFirstChildWhichIsA("Humanoid")
+	if hum then
+		hum.Died:Connect(function()
+			task.delay(1.5, function()
+				recentlyKilled[name] = nil
+				warn("♻️ Reset kill flag for: " .. name)
+			end)
+		end)
+	end
+
+	model.ChildRemoved:Connect(function(child)
+		if child:IsA("Humanoid") then
+			recentlyKilled[name] = nil
+			warn("♻️ Humanoid removed for: " .. name)
+		end
+	end)
+end
+
+-- 🔁 Main kill detection loop
+RunService.Heartbeat:Connect(function()
+	local myModel = liveFolder:FindFirstChild(playerName)
+	if not myModel then return end
+
+	local fullValue = myModel:GetAttribute("LastM1Hitted")
+	local currentDamage = myModel:GetAttribute("LastDamageDone")
+
+	local targetName
+	if fullValue then
+		local parts = string.split(fullValue, ";;")
+		targetName = parts[1]
+	end
+
+	if targetName and currentDamage and currentDamage ~= lastDamageValue then
+		local targetModel = liveFolder:FindFirstChild(targetName)
+		if not targetModel then return end
+
+		local humanoid = targetModel:FindFirstChildWhichIsA("Humanoid")
+		local lastHit = targetModel:GetAttribute("LastHit")
+		local hrp = targetModel:FindFirstChild("HumanoidRootPart")
+
+		if lastHit == playerName and humanoid and humanoid.Health <= 0 then
+			if not killSoundOnCooldown and recentlyKilled[targetName] ~= true and hrp then
+				playKillSound(hrp)
+				warn("✅ Kill sound played for:", targetName)
+				recentlyKilled[targetName] = true
+				watchTargetRespawn(targetModel)
+			else
+				warn("⏳ Kill sound blocked (cooldown or already played) for:", targetName)
+			end
+		end
+	end
+
+	lastDamageValue = currentDamage
+end)
+
+-- 🔄 Reset local state on respawn
+localPlayer.CharacterAdded:Connect(function()
+	lastDamageValue = 0
+	recentlyKilled = {}
+	killSoundOnCooldown = false
+end)
+
+
+--// Script 4: spawn sound
+
+local Players = game:GetService("Players")
+local SoundService = game:GetService("SoundService")
+local Debris = game:GetService("Debris")
+
+local localPlayer = Players.LocalPlayer
+local spawnedOnce = false
+local SOUND_ID = "rbxassetid://74137849180601"
+
+-- 🔊 Play the spawn sound
+local function playRespawnSound()
+	local s = Instance.new("Sound")
+	s.SoundId = SOUND_ID
+	s.Volume = 1
+	s.Parent = SoundService
+	s:Play()
+	Debris:AddItem(s, 10)
+end
+
+-- 🔁 On character spawn
+localPlayer.CharacterAdded:Connect(function()
+	if spawnedOnce then
+		playRespawnSound()
+	else
+		spawnedOnce = true -- first time spawn, don't play yet
+	end
+end)
+
+
+--// Script 5: Backdash skillz
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+-- CONFIG
+local STARE_DURATION = 1
+local MAX_DISTANCE = 30
+local MAX_VELOCITY = 100
+local PREDICTION_TIME = 0.25
+local SLOWED_TIMEOUT = 0.6
+local FREEZE_TIMEOUT = 0.5
+
+-- STATE
+local isSHeld = false
+local isRagdolled = false
+
+-- 🔍 Find nearest target
+local function getNearestTarget()
+	local live = Workspace:FindFirstChild("Live")
+	if not live then return nil end
+
+	local closest, shortest = nil, MAX_DISTANCE
+	for _, model in ipairs(live:GetChildren()) do
+		if model:IsA("Model") and model.Name ~= player.Name then
+			local hrp = model:FindFirstChild("HumanoidRootPart")
+			if hrp then
+				local dist = (rootPart.Position - hrp.Position).Magnitude
+				if dist < shortest then
+					shortest = dist
+					closest = hrp
+				end
+			end
+		end
+	end
+
+	return closest
+end
+
+-- 🟢 Simulate Q press
+local function pressQ()
+	VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+	task.wait(0.05)
+	VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+end
+
+-- 👁️ Method A: frame-by-frame staring for Skill 2 and 3
+local function stareMethodA(targetRoot)
+	humanoid.AutoRotate = false
+	local elapsed = 0
+	local conn
+
+	conn = RunService.RenderStepped:Connect(function(dt)
+		if isRagdolled then
+			humanoid.AutoRotate = true
+			conn:Disconnect()
+			return
+		end
+
+		elapsed += dt
+		if elapsed >= STARE_DURATION then
+			humanoid.AutoRotate = true
+			conn:Disconnect()
+			return
+		end
+
+		local velocity = targetRoot.Velocity
+		if velocity.Magnitude > MAX_VELOCITY then
+			velocity = Vector3.zero
+		end
+
+		local predicted = targetRoot.Position + velocity * PREDICTION_TIME
+		local lookAt = Vector3.new(predicted.X, rootPart.Position.Y, predicted.Z)
+		rootPart.CFrame = CFrame.lookAt(rootPart.Position, lookAt)
+	end)
+end
+
+-- 👁️ Method B: single predictive rotation for Skill 1 and 4
+local function stareMethodB(targetRoot)
+	if not targetRoot then return end
+
+	humanoid.AutoRotate = false
+	local velocity = targetRoot.Velocity
+	if velocity.Magnitude > MAX_VELOCITY then
+		velocity = Vector3.zero
+	end
+
+	local predicted = targetRoot.Position + velocity * PREDICTION_TIME
+	local lookAt = Vector3.new(predicted.X, rootPart.Position.Y, predicted.Z)
+	rootPart.CFrame = CFrame.lookAt(rootPart.Position, lookAt)
+
+	task.delay(STARE_DURATION, function()
+		humanoid.AutoRotate = true
+	end)
+end
+
+-- 🧠 Ragdoll state watcher
+local function getLiveModel()
+	local live = Workspace:FindFirstChild("Live")
+	return live and live:FindFirstChild(player.Name)
+end
+
+local function setupRagdollWatcher()
+	local live = getLiveModel()
+	if not live then return end
+
+	isRagdolled = live:FindFirstChild("Ragdoll") ~= nil
+
+	live.ChildAdded:Connect(function(c)
+		if c.Name == "Ragdoll" then isRagdolled = true end
+	end)
+	live.ChildRemoved:Connect(function(c)
+		if c.Name == "Ragdoll" then isRagdolled = false end
+	end)
+end
+
+-- ✅ True combo checker
+local function hasSlowed()
+	local model = getLiveModel()
+	return model and model:FindFirstChild("Slowed")
+end
+
+local function hasFreeze()
+	local model = getLiveModel()
+	return model and model:FindFirstChild("Freeze")
+end
+
+local function waitForSlowed(timeout)
+	local t = 0
+	while t < timeout do
+		if hasSlowed() then return true end
+		task.wait(0.05)
+		t += 0.05
+	end
+	return false
+end
+
+local function waitForFreeze(timeout)
+	local t = 0
+	while t < timeout do
+		if hasFreeze() then return true end
+		task.wait(0.05)
+		t += 0.05
+	end
+	return false
+end
+
+-- 🎮 Key input logic
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then return end
+
+	if input.KeyCode == Enum.KeyCode.S then
+		isSHeld = true
+	end
+
+	local key = input.KeyCode
+	local numberKeys = {
+		[Enum.KeyCode.One] = true,
+		[Enum.KeyCode.Two] = true,
+		[Enum.KeyCode.Three] = true,
+		[Enum.KeyCode.Four] = true
+	}
+
+	if isSHeld and numberKeys[key] then
+		local target = getNearestTarget()
+		if not target then return end
+
+		pressQ()
+
+		task.spawn(function()
+			local trueCombo = false
+
+			if key == Enum.KeyCode.One or key == Enum.KeyCode.Four then
+				trueCombo = waitForFreeze(FREEZE_TIMEOUT)
+			elseif key == Enum.KeyCode.Two or key == Enum.KeyCode.Three then
+				trueCombo = waitForSlowed(SLOWED_TIMEOUT)
+			end
+
+			if trueCombo then
+				if key == Enum.KeyCode.One or key == Enum.KeyCode.Four then
+					stareMethodB(target)
+				else
+					stareMethodA(target)
+				end
+			end
+		end)
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.KeyCode == Enum.KeyCode.S then
+		isSHeld = false
+	end
+end)
+
+-- Respawn handler
+player.CharacterAdded:Connect(function(char)
+	character = char
+	humanoid = character:WaitForChild("Humanoid")
+	rootPart = character:WaitForChild("HumanoidRootPart")
+	isSHeld = false
+	isRagdolled = false
+	task.delay(0.5, setupRagdollWatcher)
+end)
+
+-- Start
+setupRagdollWatcher()
+
+
+--// Script 6: Prediction Marker
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+local localPlayer = Players.LocalPlayer
+
+local function createPredictionMarker(name)
+	local marker = Instance.new("Part")
+	marker.Name = name
+	marker.Size = Vector3.new(0.3, 0.3, 0.3)
+	marker.Color = Color3.fromRGB(255, 0, 0)
+	marker.Material = Enum.Material.Neon
+	marker.Anchored = true
+	marker.CanCollide = false
+	marker.Transparency = 0.1
+	marker.Parent = workspace
+	return marker
+end
+
+local function getTorso(character)
+	return character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+end
+
+local function predictTorsoPosition(targetCharacter, predictionTime, deltaTime)
+	local torso = getTorso(targetCharacter)
+	if not torso then return end
+
+	local velocity = torso.Velocity
+	local predictedPosition = torso.Position + (velocity * predictionTime)
+
+	local markerName = "PredictionMarker_" .. targetCharacter.Name
+	local marker = workspace:FindFirstChild(markerName) or createPredictionMarker(markerName)
+
+	if not targetCharacter.Parent then
+		marker:Destroy()
+		return
+	end
+
+	local direction = predictedPosition - torso.Position
+	local distance = direction.Magnitude
+	if distance == 0 then return end
+
+	direction = direction.Unit
+	marker.Size = Vector3.new(0.2, 0.2, distance)
+	marker.CFrame = CFrame.new(torso.Position, predictedPosition) * CFrame.new(0, 0, -distance / 2)
+
+	-- Smooth interpolation
+	local speed = 50
+	local alpha = math.clamp(speed * deltaTime, 0, 1)
+	marker.Position = marker.Position:Lerp(predictedPosition, alpha)
+end
+
+local function splitString(str, separator)
+	local parts = {}
+	for part in string.gmatch(str, "([^" .. separator .. "]+)") do
+		table.insert(parts, part)
+	end
+	return parts
+end
+
+RunService.RenderStepped:Connect(function(deltaTime)
+	if not localPlayer or not localPlayer.Character then return end
+
+	local targetName
+	local success = pcall(function()
+		local dataFolder = workspace:WaitForChild("Live"):WaitForChild(localPlayer.Name)
+		local fullValue = dataFolder:GetAttribute("LastM1Hitted")
+		if fullValue then
+			local parts = splitString(fullValue, ";;")
+			targetName = parts[1]
+		end
+	end)
+
+	if not success or not targetName then
+		for _, marker in pairs(workspace:GetChildren()) do
+			if marker:IsA("Part") and marker.Name:match("^PredictionMarker_") then
+				marker:Destroy()
+			end
+		end
+		return
+	end
+
+	for _, player in pairs(Players:GetPlayers()) do
+		local markerName = "PredictionMarker_" .. player.Name
+		local existingMarker = workspace:FindFirstChild(markerName)
+
+		if player.Name == targetName and player.Character then
+			predictTorsoPosition(player.Character, 0.5, deltaTime)
+		elseif existingMarker then
+			existingMarker:Destroy()
+		end
+	end
+end)
+
+
+
+--// Script 7: Remove bushes
+
+local TreesFolder = workspace:WaitForChild("Map"):WaitForChild("Trees")
+
+local function deleteFakeMeshParts()
+	for _, treeModel in ipairs(TreesFolder:GetChildren()) do
+		local innerTree = treeModel:FindFirstChild("Tree")
+		if innerTree and innerTree:IsA("Model") then
+			for _, part in ipairs(innerTree:GetChildren()) do
+				if part:IsA("BasePart") and part.Name == "MeshPart" then
+					part:Destroy()
+				end
+			end
+		end
+	end
+end
+
+-- Run once at start
+deleteFakeMeshParts()
+
+-- Keep cleaning every second
+while true do
+	task.wait(1)
+	deleteFakeMeshParts()
+end
