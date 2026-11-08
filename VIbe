@@ -1,0 +1,875 @@
+--// MASTER SCRIPT - ALL 6 SCRIPTS
+--// Press MINUS (-) to stop everything and restore settings.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+local UserInputService = game:GetService("UserInputService")
+local SoundService = game:GetService("SoundService")
+local Debris = game:GetService("Debris")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local Player = Players.LocalPlayer
+
+--==================================================
+-- MASTER CONTROL
+--==================================================
+
+local Active = true
+local Connections = {}
+local CleanupFunctions = {}
+
+local function Connect(signal, callback)
+    local connection = signal:Connect(function(...)
+        if Active then
+            callback(...)
+        end
+    end)
+
+    table.insert(Connections, connection)
+    return connection
+end
+
+local function AddCleanup(callback)
+    table.insert(CleanupFunctions, callback)
+end
+
+local function StopEverything()
+    if not Active then return end
+
+    Active = false
+
+    -- Disconnect every registered connection
+    for _, connection in ipairs(Connections) do
+        pcall(function()
+            connection:Disconnect()
+        end)
+    end
+
+    table.clear(Connections)
+
+    -- Run every restoration function
+    for _, callback in ipairs(CleanupFunctions) do
+        pcall(callback)
+    end
+
+    table.clear(CleanupFunctions)
+
+    print("[MASTER] All scripts stopped. Settings restored where possible.")
+end
+
+Connect(UserInputService.InputBegan, function(input, processed)
+    if input.KeyCode == Enum.KeyCode.Minus then
+        StopEverything()
+    end
+end)
+
+--==================================================
+-- SCRIPT 1: DEATH COUNTER NOTIFIER
+--==================================================
+
+do
+    local PlayerGui = Player:WaitForChild("PlayerGui")
+
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "DeathCounterNotifierGUI"
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.Parent = PlayerGui
+
+    local NotificationFrame = Instance.new("Frame")
+    NotificationFrame.Name = "NotificationFrame"
+    NotificationFrame.Size = UDim2.new(0, 250, 0, 100)
+    NotificationFrame.Position = UDim2.new(1, -260, 1, -110)
+    NotificationFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    NotificationFrame.BackgroundTransparency = 0.3
+    NotificationFrame.BorderSizePixel = 0
+    NotificationFrame.Visible = false
+    NotificationFrame.Parent = ScreenGui
+
+    local TitleLabel = Instance.new("TextLabel")
+    TitleLabel.Size = UDim2.new(1, 0, 0.4, 0)
+    TitleLabel.BackgroundTransparency = 1
+    TitleLabel.Text = "Death Counter Detected"
+    TitleLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+    TitleLabel.Font = Enum.Font.GothamBold
+    TitleLabel.TextScaled = true
+    TitleLabel.Parent = NotificationFrame
+
+    local NameLabel = Instance.new("TextLabel")
+    NameLabel.Size = UDim2.new(1, 0, 0.6, 0)
+    NameLabel.Position = UDim2.new(0, 0, 0.4, 0)
+    NameLabel.BackgroundTransparency = 1
+    NameLabel.Text = ""
+    NameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    NameLabel.Font = Enum.Font.Gotham
+    NameLabel.TextScaled = true
+    NameLabel.Parent = NotificationFrame
+
+    local Highlights = {}
+
+    local function UpdateHighlight(model, state)
+        if not Highlights[model] and state then
+            local highlight = Instance.new("Highlight")
+            highlight.Name = "DeathCounterHighlight"
+            highlight.FillColor = Color3.fromRGB(255, 0, 0)
+            highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+            highlight.FillTransparency = 0.5
+            highlight.OutlineTransparency = 0
+            highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            highlight.Adornee = model
+            highlight.Parent = model
+
+            Highlights[model] = highlight
+
+        elseif Highlights[model] and not state then
+            Highlights[model]:Destroy()
+            Highlights[model] = nil
+        end
+    end
+
+    Connect(RunService.RenderStepped, function()
+        local found = false
+        local Live = Workspace:FindFirstChild("Live")
+
+        if not Live then
+            NotificationFrame.Visible = false
+            NameLabel.Text = ""
+            return
+        end
+
+        for _, targetPlayer in ipairs(Players:GetPlayers()) do
+            if targetPlayer ~= Player then
+                local model = Live:FindFirstChild(targetPlayer.Name)
+
+                if model then
+                    local hasCounter = model:FindFirstChild("Counter") ~= nil
+
+                    UpdateHighlight(model, hasCounter)
+
+                    if hasCounter then
+                        found = true
+                        NotificationFrame.Visible = true
+                        NameLabel.Text = targetPlayer.Name
+                    end
+                end
+            end
+        end
+
+        if not found then
+            NotificationFrame.Visible = false
+            NameLabel.Text = ""
+        end
+    end)
+
+    AddCleanup(function()
+        ScreenGui:Destroy()
+
+        for model, highlight in pairs(Highlights) do
+            if highlight then
+                highlight:Destroy()
+            end
+        end
+
+        table.clear(Highlights)
+    end)
+end
+
+--==================================================
+-- SCRIPT 2: KILL SOUND
+--==================================================
+
+do
+    local LiveFolder = Workspace:WaitForChild("Live")
+
+    local LastDamageValue = 0
+    local KillSoundOnCooldown = false
+    local RecentlyKilled = {}
+    local CreatedSounds = {}
+
+    local function PlayKillSound(targetHRP)
+        if not targetHRP or not Active then return end
+
+        local sound = Instance.new("Sound")
+        sound.Name = "KillSound"
+        sound.SoundId = "rbxassetid://131961137"
+        sound.Volume = 3
+        sound.EmitterSize = 10
+        sound.RollOffMode = Enum.RollOffMode.InverseTapered
+        sound.MaxDistance = 250
+        sound.Looped = false
+        sound.Parent = targetHRP
+
+        local reverb = Instance.new("ReverbSoundEffect")
+        reverb.DecayTime = 2
+        reverb.Density = 0.5
+        reverb.Diffusion = 0.9
+        reverb.WetLevel = -10
+        reverb.DryLevel = 0
+        reverb.Parent = sound
+
+        CreatedSounds[sound] = true
+
+        sound:Play()
+        Debris:AddItem(sound, 5)
+
+        KillSoundOnCooldown = true
+
+        task.delay(3, function()
+            if Active then
+                KillSoundOnCooldown = false
+            end
+        end)
+    end
+
+    local function WatchTargetRespawn(model)
+        local name = model.Name
+
+        if RecentlyKilled[name] == "watching" then
+            return
+        end
+
+        RecentlyKilled[name] = "watching"
+
+        local humanoid = model:FindFirstChildWhichIsA("Humanoid")
+
+        if humanoid then
+            Connect(humanoid.Died, function()
+                task.delay(1.5, function()
+                    if Active then
+                        RecentlyKilled[name] = nil
+                    end
+                end)
+            end)
+        end
+
+        Connect(model.ChildRemoved, function(child)
+            if child:IsA("Humanoid") then
+                RecentlyKilled[name] = nil
+            end
+        end)
+    end
+
+    Connect(RunService.Heartbeat, function()
+        local myModel = LiveFolder:FindFirstChild(Player.Name)
+        if not myModel then return end
+
+        local fullValue = myModel:GetAttribute("LastM1Hitted")
+        local currentDamage = myModel:GetAttribute("LastDamageDone")
+
+        local targetName
+
+        if fullValue then
+            local parts = string.split(fullValue, ";;")
+            targetName = parts[1]
+        end
+
+        if targetName and currentDamage and currentDamage ~= LastDamageValue then
+            local targetModel = LiveFolder:FindFirstChild(targetName)
+
+            if targetModel then
+                local humanoid = targetModel:FindFirstChildWhichIsA("Humanoid")
+                local lastHit = targetModel:GetAttribute("LastHit")
+                local hrp = targetModel:FindFirstChild("HumanoidRootPart")
+
+                if lastHit == Player.Name and humanoid and humanoid.Health <= 0 then
+                    if not KillSoundOnCooldown
+                        and RecentlyKilled[targetName] ~= true
+                        and hrp then
+
+                        PlayKillSound(hrp)
+                        RecentlyKilled[targetName] = true
+                        WatchTargetRespawn(targetModel)
+                    end
+                end
+            end
+        end
+
+        LastDamageValue = currentDamage
+    end)
+
+    Connect(Player.CharacterAdded, function()
+        LastDamageValue = 0
+        RecentlyKilled = {}
+        KillSoundOnCooldown = false
+    end)
+
+    AddCleanup(function()
+        for sound in pairs(CreatedSounds) do
+            pcall(function()
+                sound:Destroy()
+            end)
+        end
+
+        table.clear(CreatedSounds)
+        table.clear(RecentlyKilled)
+    end)
+end
+
+--==================================================
+-- SCRIPT 3: SPAWN SOUND
+--==================================================
+
+do
+    local SpawnedOnce = false
+    local SpawnSounds = {}
+    local SOUND_ID = "rbxassetid://74137849180601"
+
+    local function PlayRespawnSound()
+        if not Active then return end
+
+        local sound = Instance.new("Sound")
+        sound.SoundId = SOUND_ID
+        sound.Volume = 1
+        sound.Parent = SoundService
+
+        SpawnSounds[sound] = true
+
+        sound:Play()
+        Debris:AddItem(sound, 10)
+    end
+
+    Connect(Player.CharacterAdded, function()
+        if SpawnedOnce then
+            PlayRespawnSound()
+        else
+            SpawnedOnce = true
+        end
+    end)
+
+    AddCleanup(function()
+        for sound in pairs(SpawnSounds) do
+            pcall(function()
+                sound:Destroy()
+            end)
+        end
+
+        table.clear(SpawnSounds)
+    end)
+end
+
+--==================================================
+-- SCRIPT 4: BACKDASH SKILLZ
+--==================================================
+
+do
+    local character = Player.Character or Player.CharacterAdded:Wait()
+    local humanoid = character:WaitForChild("Humanoid")
+    local rootPart = character:WaitForChild("HumanoidRootPart")
+
+    local STARE_DURATION = 1
+    local MAX_DISTANCE = 30
+    local MAX_VELOCITY = 100
+    local PREDICTION_TIME = 0.25
+    local SLOWED_TIMEOUT = 0.6
+    local FREEZE_TIMEOUT = 0.5
+
+    local isSHeld = false
+    local isRagdolled = false
+
+    local RagdollConnections = {}
+
+    local function DisconnectRagdollConnections()
+        for _, connection in ipairs(RagdollConnections) do
+            connection:Disconnect()
+        end
+
+        table.clear(RagdollConnections)
+    end
+
+    local function getNearestTarget()
+        local live = Workspace:FindFirstChild("Live")
+        if not live or not rootPart then return nil end
+
+        local closest, shortest = nil, MAX_DISTANCE
+
+        for _, model in ipairs(live:GetChildren()) do
+            if model:IsA("Model") and model.Name ~= Player.Name then
+                local hrp = model:FindFirstChild("HumanoidRootPart")
+
+                if hrp then
+                    local dist = (rootPart.Position - hrp.Position).Magnitude
+
+                    if dist < shortest then
+                        shortest = dist
+                        closest = hrp
+                    end
+                end
+            end
+        end
+
+        return closest
+    end
+
+    local function pressQ()
+        if not Active then return end
+
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+        task.wait(0.05)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+    end
+
+    local function stareMethodA(targetRoot)
+        if not targetRoot or not humanoid or not rootPart then return end
+
+        local currentHumanoid = humanoid
+        currentHumanoid.AutoRotate = false
+
+        local elapsed = 0
+        local connection
+
+        connection = RunService.RenderStepped:Connect(function(dt)
+            if not Active then
+                connection:Disconnect()
+                return
+            end
+
+            if isRagdolled then
+                currentHumanoid.AutoRotate = true
+                connection:Disconnect()
+                return
+            end
+
+            if not targetRoot.Parent or not rootPart.Parent then
+                currentHumanoid.AutoRotate = true
+                connection:Disconnect()
+                return
+            end
+
+            elapsed += dt
+
+            if elapsed >= STARE_DURATION then
+                currentHumanoid.AutoRotate = true
+                connection:Disconnect()
+                return
+            end
+
+            local velocity = targetRoot.Velocity
+
+            if velocity.Magnitude > MAX_VELOCITY then
+                velocity = Vector3.zero
+            end
+
+            local predicted = targetRoot.Position + velocity * PREDICTION_TIME
+            local lookAt = Vector3.new(predicted.X, rootPart.Position.Y, predicted.Z)
+
+            rootPart.CFrame = CFrame.lookAt(rootPart.Position, lookAt)
+        end)
+
+        table.insert(Connections, connection)
+    end
+
+    local function stareMethodB(targetRoot)
+        if not targetRoot or not humanoid or not rootPart then return end
+
+        local currentHumanoid = humanoid
+        currentHumanoid.AutoRotate = false
+
+        local velocity = targetRoot.Velocity
+
+        if velocity.Magnitude > MAX_VELOCITY then
+            velocity = Vector3.zero
+        end
+
+        local predicted = targetRoot.Position + velocity * PREDICTION_TIME
+        local lookAt = Vector3.new(predicted.X, rootPart.Position.Y, predicted.Z)
+
+        rootPart.CFrame = CFrame.lookAt(rootPart.Position, lookAt)
+
+        task.delay(STARE_DURATION, function()
+            if Active and currentHumanoid.Parent then
+                currentHumanoid.AutoRotate = true
+            end
+        end)
+    end
+
+    local function getLiveModel()
+        local live = Workspace:FindFirstChild("Live")
+        return live and live:FindFirstChild(Player.Name)
+    end
+
+    local function setupRagdollWatcher()
+        DisconnectRagdollConnections()
+
+        local live = getLiveModel()
+        if not live then return end
+
+        isRagdolled = live:FindFirstChild("Ragdoll") ~= nil
+
+        table.insert(RagdollConnections, live.ChildAdded:Connect(function(child)
+            if child.Name == "Ragdoll" then
+                isRagdolled = true
+            end
+        end))
+
+        table.insert(RagdollConnections, live.ChildRemoved:Connect(function(child)
+            if child.Name == "Ragdoll" then
+                isRagdolled = false
+            end
+        end))
+    end
+
+    local function hasSlowed()
+        local model = getLiveModel()
+        return model and model:FindFirstChild("Slowed")
+    end
+
+    local function hasFreeze()
+        local model = getLiveModel()
+        return model and model:FindFirstChild("Freeze")
+    end
+
+    local function waitForSlowed(timeout)
+        local t = 0
+
+        while Active and t < timeout do
+            if hasSlowed() then return true end
+            task.wait(0.05)
+            t += 0.05
+        end
+
+        return false
+    end
+
+    local function waitForFreeze(timeout)
+        local t = 0
+
+        while Active and t < timeout do
+            if hasFreeze() then return true end
+            task.wait(0.05)
+            t += 0.05
+        end
+
+        return false
+    end
+
+    Connect(UserInputService.InputBegan, function(input, processed)
+        if processed then return end
+
+        if input.KeyCode == Enum.KeyCode.S then
+            isSHeld = true
+        end
+
+        local numberKeys = {
+            [Enum.KeyCode.One] = true,
+            [Enum.KeyCode.Two] = true,
+            [Enum.KeyCode.Three] = true,
+            [Enum.KeyCode.Four] = true
+        }
+
+        if isSHeld and numberKeys[input.KeyCode] then
+            local target = getNearestTarget()
+            if not target then return end
+
+            pressQ()
+
+            task.spawn(function()
+                if not Active then return end
+
+                local trueCombo = false
+
+                if input.KeyCode == Enum.KeyCode.One
+                    or input.KeyCode == Enum.KeyCode.Four then
+
+                    trueCombo = waitForFreeze(FREEZE_TIMEOUT)
+
+                elseif input.KeyCode == Enum.KeyCode.Two
+                    or input.KeyCode == Enum.KeyCode.Three then
+
+                    trueCombo = waitForSlowed(SLOWED_TIMEOUT)
+                end
+
+                if not Active or not trueCombo then return end
+
+                if input.KeyCode == Enum.KeyCode.One
+                    or input.KeyCode == Enum.KeyCode.Four then
+
+                    stareMethodB(target)
+                else
+                    stareMethodA(target)
+                end
+            end)
+        end
+    end)
+
+    Connect(UserInputService.InputEnded, function(input)
+        if input.KeyCode == Enum.KeyCode.S then
+            isSHeld = false
+        end
+    end)
+
+    local function updateCharacter(char)
+        if humanoid then
+            humanoid.AutoRotate = true
+        end
+
+        character = char
+        humanoid = char:WaitForChild("Humanoid")
+        rootPart = char:WaitForChild("HumanoidRootPart")
+
+        isSHeld = false
+        isRagdolled = false
+
+        task.delay(0.5, function()
+            if Active then
+                setupRagdollWatcher()
+            end
+        end)
+    end
+
+    Connect(Player.CharacterAdded, updateCharacter)
+
+    setupRagdollWatcher()
+
+    AddCleanup(function()
+        isSHeld = false
+        isRagdolled = false
+
+        DisconnectRagdollConnections()
+
+        if humanoid then
+            humanoid.AutoRotate = true
+        end
+    end)
+end
+
+--==================================================
+-- SCRIPT 5: FPS BOOST / TSB OPTIMIZER
+--==================================================
+
+do
+    local Original = {
+        GlobalShadows = Lighting.GlobalShadows,
+        EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale,
+        EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale,
+        FogStart = Lighting.FogStart,
+        FogEnd = Lighting.FogEnd,
+        Parts = {},
+        Sky = nil
+    }
+
+    local function SaveAndApply(obj)
+        if Original.Parts[obj] then return end
+
+        if obj:IsA("BasePart") then
+            Original.Parts[obj] = {
+                Type = "Part",
+                Material = obj.Material
+            }
+
+            if obj:IsA("MeshPart") then
+                Original.Parts[obj].TextureID = obj.TextureID
+                obj.TextureID = ""
+            end
+
+            obj.Material = Enum.Material.SmoothPlastic
+
+        elseif obj:IsA("Texture") or obj:IsA("Decal") then
+            Original.Parts[obj] = {
+                Type = "Texture",
+                Transparency = obj.Transparency
+            }
+
+            obj.Transparency = 1
+        end
+    end
+
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        pcall(SaveAndApply, obj)
+    end
+
+    Connect(Workspace.DescendantAdded, function(obj)
+        pcall(SaveAndApply, obj)
+    end)
+
+    Lighting.GlobalShadows = false
+    Lighting.EnvironmentSpecularScale = 0
+    Lighting.EnvironmentDiffuseScale = 0
+
+    local sky = Lighting:FindFirstChildOfClass("Sky")
+
+    if sky then
+        Original.Sky = sky
+        sky.Parent = nil
+    end
+
+    pcall(function()
+        RunService:Set3DRenderingEnabled(false)
+    end)
+
+    AddCleanup(function()
+        -- Restore materials and textures
+        for obj, data in pairs(Original.Parts) do
+            if obj and obj.Parent then
+                pcall(function()
+                    if data.Type == "Part" then
+                        obj.Material = data.Material
+
+                        if data.TextureID ~= nil then
+                            obj.TextureID = data.TextureID
+                        end
+
+                    elseif data.Type == "Texture" then
+                        obj.Transparency = data.Transparency
+                    end
+                end)
+            end
+        end
+
+        -- Restore lighting
+        Lighting.GlobalShadows = Original.GlobalShadows
+        Lighting.EnvironmentSpecularScale = Original.EnvironmentSpecularScale
+        Lighting.EnvironmentDiffuseScale = Original.EnvironmentDiffuseScale
+        Lighting.FogStart = Original.FogStart
+        Lighting.FogEnd = Original.FogEnd
+
+        -- Restore sky
+        if Original.Sky then
+            pcall(function()
+                Original.Sky.Parent = Lighting
+            end)
+        end
+
+        -- Restore 3D rendering
+        pcall(function()
+            RunService:Set3DRenderingEnabled(true)
+        end)
+
+        table.clear(Original.Parts)
+    end)
+end
+
+--==================================================
+-- SCRIPT 6: +0.5 STUD DASH
+--==================================================
+
+do
+    local MOVE_DISTANCE = 0.5
+    local PAIR_WINDOW = 0.4
+
+    local HRP
+    local MyModel
+
+    local LastDashTime
+    local LastM1Time
+
+    local CharacterConnections = {}
+
+    local function DisconnectCharacterConnections()
+        for _, connection in ipairs(CharacterConnections) do
+            connection:Disconnect()
+        end
+
+        table.clear(CharacterConnections)
+    end
+
+    local function MoveForward()
+        if not Active or not HRP or not HRP.Parent then
+            return
+        end
+
+        HRP.CFrame = HRP.CFrame + (HRP.CFrame.LookVector * MOVE_DISTANCE)
+
+        print("[Dash TP] SUCCESS: Dash + M1 detected! Moved 0.5 studs forward.")
+    end
+
+    local function CheckPair()
+        if not LastDashTime or not LastM1Time then
+            return
+        end
+
+        local difference = math.abs(LastDashTime - LastM1Time)
+
+        if difference <= PAIR_WINDOW then
+            LastDashTime = nil
+            LastM1Time = nil
+
+            MoveForward()
+        end
+    end
+
+    local function OnDashChanged(direction)
+        if not Active then return end
+
+        LastDashTime = os.clock()
+
+        print("[Dash TP] Confirmed " .. direction .. " Dash!")
+
+        CheckPair()
+    end
+
+    local function OnM1Changed()
+        if not Active then return end
+
+        LastM1Time = os.clock()
+
+        print("[Dash TP] Actual M1 detected! LastM1Fire changed.")
+
+        CheckPair()
+    end
+
+    local function BindCharacter()
+        DisconnectCharacterConnections()
+
+        LastDashTime = nil
+        LastM1Time = nil
+
+        local liveFolder = Workspace:WaitForChild("Live", 10)
+        if not Active or not liveFolder then return end
+
+        MyModel = liveFolder:WaitForChild(Player.Name, 10)
+        if not Active or not MyModel then return end
+
+        HRP = MyModel:WaitForChild("HumanoidRootPart", 10)
+        if not Active or not HRP then return end
+
+        table.insert(CharacterConnections,
+            MyModel:GetAttributeChangedSignal("JustLeftDashed"):Connect(function()
+                OnDashChanged("LEFT")
+            end)
+        )
+
+        table.insert(CharacterConnections,
+            MyModel:GetAttributeChangedSignal("JustRightDashed"):Connect(function()
+                OnDashChanged("RIGHT")
+            end)
+        )
+
+        table.insert(CharacterConnections,
+            MyModel:GetAttributeChangedSignal("LastM1Fire"):Connect(OnM1Changed)
+        )
+
+        print("[Dash TP] Trackers connected successfully.")
+    end
+
+    task.spawn(function()
+        if Player.Character then
+            BindCharacter()
+        end
+    end)
+
+    Connect(Player.CharacterAdded, function()
+        task.wait(0.5)
+
+        if Active then
+            BindCharacter()
+        end
+    end)
+
+    AddCleanup(function()
+        DisconnectCharacterConnections()
+
+        LastDashTime = nil
+        LastM1Time = nil
+
+        HRP = nil
+        MyModel = nil
+    end)
+end
+
+--==================================================
+-- FINISHED
+--==================================================
+
+print("[MASTER] All 6 scripts are running.")
+print("[MASTER] Press MINUS (-) to stop everything.")
